@@ -102,6 +102,9 @@ const Footer = () => {
             <Link to="/contact-support" className="footer__link block hover:text-white transition-colors duration-200">
               {t("footer.contactSupport")}
             </Link>
+            <Link to="/account-deletion" className="footer__link block hover:text-white transition-colors duration-200">
+              {t("footer.accountDeletion")}
+            </Link>
           </nav>
         </motion.div>
 

@@ -57,6 +57,7 @@ const Subscribe = lazy(() => import('./pages/Subscribe/Subscribe'))
 const Contact = lazy(() => import('./pages/Contact/Contact'))
 const TermsOfService = lazy(() => import('./pages/TermsOfService/TermsOfService'))
 const RewardsEligibility = lazy(() => import('./pages/RewardsEligibility/RewardsEligibility'))
+const AccountDeletion = lazy(() => import('./pages/AccountDeletion/AccountDeletion'))
 
 import Loading from './components/Loading/Loading'
 import SignupForMoney from './pages/Auth/SignupForMoney'
@@ -342,6 +343,9 @@ const AppRouter = () => {
         },
         {
           path: "Subscription", element: <Suspense fallback={<Loading />}> <Subscribe /></Suspense>
+        },
+        {
+          path: "account-deletion", element: <Suspense fallback={<Loading />}> <AccountDeletion /></Suspense>
         }
       ]
     },

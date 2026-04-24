@@ -284,6 +284,20 @@ export const userService = {
         }
     },
 
+    // Request account deletion
+    requestAccountDeletion: async (data, token) => {
+        try {
+            const response = await api.post('/user/requestAccountDeletion', data, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            });
+            return response.data;
+        } catch (error) {
+            throw error.response?.data || error.message;
+        }
+    },
+
 };
 
 export default userService;
