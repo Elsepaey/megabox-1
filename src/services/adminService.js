@@ -219,7 +219,7 @@ export const adminService = {
     // Get all subscription plans
     getPlans: async () => {
         try {
-            const response = await api.get('/auth/getPlans');
+            const response = await api.get('/plans');
             return response.data;
         } catch (error) {
             throw error.response?.data || error.message;

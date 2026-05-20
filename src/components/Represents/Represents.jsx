@@ -8,13 +8,14 @@ import Zoom from 'react-medium-image-zoom';
 import { HiX } from "react-icons/hi";
 import { HiArrowDownTray } from "react-icons/hi2";
 import { FaFilePdf, FaFileWord, FaFileExcel, FaFilePowerpoint, FaFileAlt } from 'react-icons/fa';
+import VideoPlayer from '../VideoPlayer/VideoPlayer';
 
 import './Represents.scss';
 
 // Set the worker source for PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
-export default function Represents({ type, path, ToggleUploadFile }) {
+export default function Represents({ type, path, ToggleUploadFile, videoData }) {
     console.log('Represents mounted with type:', type, 'path:', path);
 
     const NeededType = type?.split("/")[1];
@@ -288,14 +289,25 @@ export default function Represents({ type, path, ToggleUploadFile }) {
                         )}
                     </div>
                 ) : isVideo ? (
-                    <video
-                        src={path}
-                        controls
-                        className="max-h-[90vh] w-full rounded-lg shadow-lg"
-                        style={{ maxWidth: '100%', backgroundColor: '#000' }}
-                    >
-                        Your browser does not support the video tag.
-                    </video>
+                    videoData ? (
+                        <VideoPlayer
+                            videoUrl={path}
+                            title={videoData.fileName || videoData.name || 'Video'}
+                            fileId={videoData._id || videoData.id}
+                            downloads={videoData.downloads || []}
+                            readyToStream={videoData.readyToStream !== false}
+                            onClose={ToggleUploadFile}
+                        />
+                    ) : (
+                        <video
+                            src={path}
+                            controls
+                            className="max-h-[90vh] w-full rounded-lg shadow-lg"
+                            style={{ maxWidth: '100%', backgroundColor: '#000' }}
+                        >
+                            Your browser does not support the video tag.
+                        </video>
+                    )
                 ) : isDocument ? (
                     <div className="w-full h-[90vh] bg-gray-100 rounded-lg shadow-lg overflow-hidden">
                         <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-blue-50 to-indigo-100 p-8">

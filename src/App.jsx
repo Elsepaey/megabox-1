@@ -58,6 +58,7 @@ const Contact = lazy(() => import('./pages/Contact/Contact'))
 const TermsOfService = lazy(() => import('./pages/TermsOfService/TermsOfService'))
 const RewardsEligibility = lazy(() => import('./pages/RewardsEligibility/RewardsEligibility'))
 const AccountDeletion = lazy(() => import('./pages/AccountDeletion/AccountDeletion'))
+const Premium = lazy(() => import('./pages/Premium/Premium'))
 
 import Loading from './components/Loading/Loading'
 import SignupForMoney from './pages/Auth/SignupForMoney'
@@ -86,18 +87,31 @@ const LoginRoute = () => (
         onSignup={() => navigate('/signup')}
         onForgot={() => navigate('/forgot-password')}
         onSubmit={async (values) => {
-          let success = await auth.login(values.email, values.password)
-          if (success) {
-            const { role } = jwtDecode(success);
-            switch (role) {
-              case 'User':
-                navigate('/dashboard');
-                break;
-              case 'Owner':
-                navigate('/Owner/profile');
-                break;
-              default:
-                navigate('/dashboard');
+          const result = await auth.login(values.email, values.password);
+
+          // Unverified email → backend returns 403 'verify your email'.
+          // AuthContext already populated tempEmail; route to OTP screen.
+          if (result && typeof result === 'object' && result.needsEmailVerification) {
+            navigate('/confirm-email');
+            return;
+          }
+
+          if (result) {
+            const accessToken = result;
+            try {
+              const { role } = jwtDecode(accessToken);
+              switch (role) {
+                case 'User':
+                  navigate('/dashboard');
+                  break;
+                case 'Owner':
+                  navigate('/Owner/profile');
+                  break;
+                default:
+                  navigate('/dashboard');
+              }
+            } catch {
+              navigate('/dashboard');
             }
           }
         }}
@@ -118,7 +132,8 @@ const SignupRoute = () => (
             values.username,
             values.email,
             values.password,
-            values.confirmationPassword
+            values.confirmationPassword,
+            values.privacyPolicyVersion
           );
           if (success) {
             navigate('/confirm-email');
@@ -219,7 +234,8 @@ const RegisterRoute = () => (
               values.email,
               values.password,
               values.confirmationPassword,
-              ref
+              ref,
+              values.privacyPolicyVersion
             );
 
             if (success) {
@@ -240,9 +256,11 @@ const ConfirmEmailRouteWithTemp = () => (
       <ConfirmEmail
         email={auth.tempEmail}
         onConfirm={async (code) => {
+          // confirmOTP now auto-logs in (backend returns tokens), so we go
+          // straight to the dashboard.
           const success = await auth.confirmOTP(code, auth.tempEmail);
           if (success) {
-            navigate('/login');
+            navigate('/dashboard');
           }
         }}
         onResend={async () => {
@@ -346,6 +364,9 @@ const AppRouter = () => {
         },
         {
           path: "account-deletion", element: <Suspense fallback={<Loading />}> <AccountDeletion /></Suspense>
+        },
+        {
+          path: "premium", element: <Suspense fallback={<Loading />}> <Premium /></Suspense>
         }
       ]
     },

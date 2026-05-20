@@ -1,0 +1,399 @@
+.subscription-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    padding: 16px;
+}
+
+.subscription-modal {
+    background: white;
+    border-radius: 1.5rem;
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    position: relative;
+    padding: 2rem;
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
+
+    &__close {
+        position: absolute;
+        top: 1.25rem;
+        right: 1.25rem;
+        background: #f3f4f6;
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+
+        &:hover {
+            background: #e5e7eb;
+        }
+
+        svg {
+            color: #718096;
+            font-size: 18px;
+        }
+    }
+
+    &__title {
+        font-size: 1.75rem;
+        font-weight: 700;
+        color: #1a202c;
+        margin-bottom: 12px;
+        padding-right: 48px;
+    }
+
+    &__plan-info {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 14px 20px;
+        border-radius: 1rem;
+        margin-bottom: 24px;
+
+        span:first-child {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+    }
+
+    &__plan-price {
+        font-size: 1.5rem;
+        font-weight: 800;
+    }
+
+    &__steps {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 28px;
+        gap: 8px;
+    }
+
+    &__step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    &__step-number {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #e2e8f0;
+        color: #718096;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 700;
+        transition: all 0.3s;
+
+        svg {
+            font-size: 14px;
+        }
+    }
+
+    &__step--active &__step-number {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+
+    &__step--completed &__step-number {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+    }
+
+    &__step-label {
+        font-size: 13px;
+        color: #718096;
+        font-weight: 600;
+        display: none;
+
+        @media (min-width: 400px) {
+            display: block;
+        }
+    }
+
+    &__step--active &__step-label {
+        color: #4f46e5;
+    }
+
+    &__step-line {
+        width: 28px;
+        height: 3px;
+        background: #e2e8f0;
+        border-radius: 2px;
+
+        @media (min-width: 400px) {
+            width: 44px;
+        }
+    }
+
+    &__step--completed + &__step-line {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    }
+
+    &__content {
+        min-height: 220px;
+    }
+
+    &__step-content {
+        h3 {
+            font-size: 1.125rem;
+            font-weight: 700;
+            color: #1a202c;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+    }
+
+    &__loading,
+    &__empty {
+        text-align: center;
+        padding: 32px;
+        color: #718096;
+        font-size: 1rem;
+    }
+
+    &__payment-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    &__payment-item {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px 18px;
+        background: #f8f9fa;
+        border: 2px solid #e2e8f0;
+        border-radius: 1rem;
+        cursor: pointer;
+        transition: all 0.2s;
+
+        &:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        &--selected {
+            background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%);
+            border-color: #667eea;
+        }
+
+        input[type="radio"] {
+            display: none;
+        }
+    }
+
+    &__payment-info {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    &__payment-type {
+        font-size: 15px;
+        font-weight: 700;
+        color: #1a202c;
+        text-transform: capitalize;
+    }
+
+    &__payment-details {
+        font-size: 13px;
+        color: #718096;
+    }
+
+    &__payment-check {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: 2px solid #e2e8f0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+
+        svg {
+            font-size: 12px;
+            color: white;
+            opacity: 0;
+        }
+    }
+
+    &__payment-item--selected &__payment-check {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-color: #667eea;
+
+        svg {
+            opacity: 1;
+        }
+    }
+
+    &__form-group {
+        margin-bottom: 18px;
+
+        label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 10px;
+
+            svg {
+                color: #667eea;
+            }
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid #e2e8f0;
+            border-radius: 0.875rem;
+            font-size: 15px;
+            transition: all 0.2s;
+
+            &:focus {
+                outline: none;
+                border-color: #667eea;
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            }
+
+            &::placeholder {
+                color: #a0aec0;
+            }
+
+            &:disabled {
+                background: #f7fafc;
+                cursor: not-allowed;
+            }
+        }
+    }
+
+    &__upload-desc {
+        font-size: 14px;
+        color: #718096;
+        text-align: center;
+        margin-bottom: 20px;
+        line-height: 1.5;
+    }
+
+    &__upload-area {
+        input[type="file"] {
+            display: none;
+        }
+    }
+
+    &__upload-label {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        padding: 40px 28px;
+        border: 2px dashed #cbd5e1;
+        border-radius: 1rem;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: center;
+        background: #f8f9fa;
+
+        &:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        svg {
+            font-size: 40px;
+            color: #667eea;
+        }
+
+        span {
+            font-size: 15px;
+            color: #4a5568;
+            font-weight: 500;
+        }
+    }
+
+    &__actions {
+        display: flex;
+        gap: 14px;
+        margin-top: 28px;
+    }
+
+    &__btn {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 16px 24px;
+        border-radius: 0.875rem;
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.3s;
+
+        &--primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+
+            &:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+            }
+        }
+
+        &--secondary {
+            background: #f1f5f9;
+            color: #4a5568;
+            border: none;
+
+            &:hover:not(:disabled) {
+                background: #e2e8f0;
+            }
+        }
+
+        &:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        svg {
+            font-size: 14px;
+        }
+    }
+}
+
+[dir="rtl"] .subscription-modal {
+    &__close {
+        right: auto;
+        left: 1.25rem;
+    }
+
+    &__title {
+        padding-right: 0;
+        padding-left: 48px;
+    }
+}

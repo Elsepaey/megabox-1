@@ -31,7 +31,7 @@ export const notificationService = {
 
     getUserNotifications: async (token) => {
         try {
-            const response = await api.get('/user/getUserNotifications', {
+            const response = await api.get('/notifications', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }

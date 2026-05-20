@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import Footer from "../../components/Footer/Footer";
 import { useLanguage } from "../../context/LanguageContext";
-import { useAuth } from "../../context/AuthContext";
 import { userService } from "../../services/userService";
 import { useCookies } from "react-cookie";
 import { toast } from "react-toastify";
@@ -10,7 +9,6 @@ import './AccountDeletion.scss';
 
 const AccountDeletion = () => {
     const { t, language } = useLanguage();
-    const { user } = useAuth();
     const [cookies] = useCookies(['MegaBox']);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [requestSubmitted, setRequestSubmitted] = useState(false);
@@ -27,7 +25,8 @@ const AccountDeletion = () => {
 
         setIsSubmitting(true);
         try {
-            const token = cookies.MegaBox;
+            // Token is optional - only send if user is logged in
+            const token = cookies.MegaBox || null;
             await userService.requestAccountDeletion({ email, reason }, token);
             toast.success(t('accountDeletion.successMessage'), ToastOptions("success"));
             setRequestSubmitted(true);

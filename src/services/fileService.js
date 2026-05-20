@@ -1,28 +1,45 @@
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../helpers/ToastOptions';
 import { api } from './apiConfig';
+import { uploadFile as orchestratorUpload, pauseUpload as orchestratorPause, cancelUpload as orchestratorCancel } from './uploadOrchestrator';
+import { getAllItemsLegacyShape } from './itemsService';
 
 export const fileService = {
-    uploadFile: async (file, token) => {
-        try {
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            const { data } = await api.post("/auth/createFile", formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    Authorization: `Bearer ${token}`
-                }
-            });
-
-            if (data?.message === "✅ تم رفع الملف بنجاح")
-                return true;
-
-            return false;
-        } catch (error) {
-            toast.error(error.response?.data?.message || "Something went wrong", ToastOptions("error"));
-            throw error.response?.data || error.message;
+    /**
+     * Upload via the unified backend init endpoint. Routes to TUS (Bunny) for
+     * videos and presigned R2 multipart for everything else.
+     *
+     * @param {File} file
+     * @param {string} token
+     * @param {{ folderId?: string, channelId?: string, onProgress?: (sent:number,total:number)=>void }} [opts]
+     * @returns {Promise<true | { success:false, error:string }>}
+     */
+    uploadFile: async (file, token, opts = {}) => {
+        const result = await orchestratorUpload(file, token, opts);
+        if (!result.success) {
+            const message = result.error || 'Upload failed';
+            toast.error(message, ToastOptions('error'));
+            return result;
         }
+        return true;
+    },
+
+    /**
+     * Pause an in-progress upload
+     * @param {string} fileId - The file ID to pause
+     * @param {{ isVideo: boolean }} opts - Upload type options
+     */
+    pauseUpload: (fileId, { isVideo }) => {
+        return orchestratorPause(fileId, { isVideo });
+    },
+
+    /**
+     * Cancel an in-progress upload and clean up
+     * @param {string} fileId - The file ID to cancel
+     * @param {{ isVideo: boolean }} opts - Upload type options
+     */
+    cancelUpload: async (fileId, { isVideo }) => {
+        return orchestratorCancel(fileId, { isVideo });
     },
 
     deletFile: async (id, token) => {
@@ -100,178 +117,57 @@ export const fileService = {
         }
     },
 
-    // Get all files (excluding archived) - includes created zip files
+    /**
+     * @deprecated Use getAllUnifiedItems() from itemsService instead
+     */
     getAllFiles: async (token) => {
-        try {
-            const { data } = await api.get('/auth/getUserFiles', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            // Filter out archived files
-            if (data?.files) {
-                data.files = data.files.filter(file => !file.archived && !file.isArchived);
-            }
-            
-            // Also include created zip files from getMyZips (call API directly to avoid circular dependency)
-            try {
-                const zipResponse = await api.get('/auth/getMyZips', {
-                    headers: {
-                        Authorization: `Bearer ${token}`
-                    }
-                });
-                const createdZips = zipResponse.data?.zips || zipResponse.data?.files || [];
-                if (createdZips.length > 0) {
-                    // Merge created zips with regular files, avoiding duplicates
-                    // Use a more robust duplicate check that includes both _id and id fields
-                    const existingIds = new Set();
-                    (data?.files || []).forEach(f => {
-                        if (f._id) existingIds.add(String(f._id));
-                        if (f.id) existingIds.add(String(f.id));
-                    });
-                    
-                    const newZips = createdZips
-                        .filter(zip => {
-                            const zipId = zip._id || zip.id;
-                            // Also filter out archived zips
-                            const isArchived = zip.archived === true || zip.isArchived === true;
-                            return zipId && !existingIds.has(String(zipId)) && !isArchived;
-                        })
-                        .map(zip => {
-                            const zipId = zip._id || zip.id;
-                            if (zipId) existingIds.add(String(zipId)); // Track added IDs
-                            return {
-                                ...zip,
-                                fileType: zip.fileType || 'application/zip', // Ensure zip type is set
-                                fileName: zip.fileName || zip.name || 'zip_file.zip'
-                            };
-                        });
-                    if (newZips.length > 0) {
-                        data.files = [...(data?.files || []), ...newZips];
-                    }
-                }
-            } catch {
-                // Silently fail - created zips are optional
-            }
-            
-            return data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+        const { files, folders } = await getAllItemsLegacyShape(token, { type: 'all' });
+        return { files, folders };
     },
 
-    // Get image files only
+    /**
+     * @deprecated Use getAllUnifiedItems(token, { type: 'image' }) from itemsService instead
+     */
     getImageFiles: async (token) => {
-        try {
-            const { data } = await api.get('/auth/getUserFiles', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            // Filter for images only, excluding archived
-            if (data?.files) {
-                data.files = data.files.filter(file =>
-                    file.fileType?.startsWith('image/') &&
-                    !file.archived &&
-                    !file.isArchived
-                );
-            }
-            return data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+        const { files } = await getAllItemsLegacyShape(token, { type: 'image' });
+        return { files };
     },
 
-    // Get video files only
+    /**
+     * @deprecated Use getAllUnifiedItems(token, { type: 'video' }) from itemsService instead
+     */
     getVideoFiles: async (token) => {
-        try {
-            const { data } = await api.get('/auth/getUserFiles', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            // Filter for videos only, excluding archived
-            if (data?.files) {
-                data.files = data.files.filter(file =>
-                    file.fileType?.startsWith('video/') &&
-                    !file.archived &&
-                    !file.isArchived
-                );
-            }
-            return data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+        const { files } = await getAllItemsLegacyShape(token, { type: 'video' });
+        return { files };
     },
 
-    // Get document files only
+    /**
+     * @deprecated Use getAllUnifiedItems(token, { type: 'document' }) from itemsService instead
+     */
     getDocumentFiles: async (token) => {
-        try {
-            const { data } = await api.get('/auth/getUserFiles', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            // Filter for documents only, excluding archived
-            // This list must match getFileCategory in MimeType.js
-            const documentTypes = [
-                'application/pdf',
-                'application/msword',
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'application/vnd.ms-excel',
-                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                'application/vnd.ms-powerpoint',
-                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                'application/vnd.oasis.opendocument.text',
-                'application/vnd.oasis.opendocument.spreadsheet',
-                'application/vnd.oasis.opendocument.presentation',
-                'application/vnd.oasis.opendocument.graphics',
-                'application/odf',
-                'application/json',
-                'text/plain'
-            ];
-            if (data?.files) {
-                data.files = data.files.filter(file =>
-                    documentTypes.includes(file.fileType) &&
-                    !file.archived &&
-                    !file.isArchived
-                );
-            }
-            return data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+        const { files } = await getAllItemsLegacyShape(token, { type: 'document' });
+        return { files };
     },
 
-    // Get zip files only
+    /**
+     * @deprecated Use getAllUnifiedItems(token, { type: 'zip' }) from itemsService instead
+     */
     getZipFiles: async (token) => {
-        try {
-            const { data } = await api.get('/auth/getUserFiles', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            // Filter for zip files only, excluding archived
-            const zipTypes = [
-                'application/zip',
-                'application/x-zip-compressed',
-                'multipart/x-zip',
-                'application/x-compressed',
-            ];
-            if (data?.files) {
-                data.files = data.files.filter(file =>
-                    zipTypes.includes(file.fileType) &&
-                    !file.archived &&
-                    !file.isArchived
-                );
-            }
-            return data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+        const { files } = await getAllItemsLegacyShape(token, { type: 'zip' });
+        return { files };
     },
 
-    // Get archived files only
+    /**
+     * @deprecated Use getAllUnifiedItems(token, { folderId }) from itemsService instead
+     */
+    getFolderItems: async (token, folderId) => {
+        return getAllItemsLegacyShape(token, { folderId });
+    },
+
+    /**
+     * Get archived files only
+     * @deprecated Use getAllUnifiedItems() with type filter from itemsService instead
+     */
     getArchivedFiles: async (token) => {
         try {
             const { data } = await api.get('/auth/getUserFiles', {
@@ -316,7 +212,7 @@ export const fileService = {
     // We need to find which archive contains this file first
     unarchiveFile: async (fileId, token) => {
         try {
-            const archivesResponse = await api.get('/auth/getMyArchives', {
+            const archivesResponse = await api.get('/archives', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -396,7 +292,7 @@ export const fileService = {
     // Get user's zip files
     getMyZips: async (token) => {
         try {
-            const { data } = await api.get('/auth/getMyZips', {
+            const { data } = await api.get('/zips', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -469,7 +365,7 @@ export const fileService = {
     // Get user's archives
     getMyArchives: async (token) => {
         try {
-            const { data } = await api.get('/auth/getMyArchives', {
+            const { data } = await api.get('/archives', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -533,7 +429,7 @@ export const fileService = {
             console.log('🗑️ Removing from archive:', { itemId, files: fileIds, folders: folderIds });
             
             // Get all archives to find which ones contain these files/folders
-            const archivesResponse = await api.get('/auth/getMyArchives', {
+            const archivesResponse = await api.get('/archives', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -759,7 +655,7 @@ export const fileService = {
     // Get user storage usage
     getUserStorageUsage: async (token) => {
         try {
-            const { data } = await api.get('/auth/getUserStorageUsage', {
+            const { data } = await api.get('/storage/usage', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }

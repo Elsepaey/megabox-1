@@ -55,7 +55,7 @@ export default function PartnerFormModal({ isOpen, onClose }) {
     // Fetch user data if logged in and populate form
     const fetchUserData = async () => {
         try {
-            const response = await api.get('/user/Getloginuseraccount', {
+            const response = await api.get('/users/profile', {
                 headers: {
                     Authorization: `Bearer ${cookies.MegaBox}`
                 }

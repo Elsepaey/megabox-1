@@ -5,9 +5,11 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
 import { API_URL, userService, fileService } from '../../../services/api';
+import { itemsService, getAllUnifiedItems } from '../../../services/itemsService';
 import { getFileCategory } from '../../../helpers/MimeType';
 import File from '../../../components/File/File';
 import { Folder } from '../../../components/Folder/Folder';
+import UnifiedItemList from '../../../components/UnifiedItemList/UnifiedItemList';
 import UploadFile from '../../../components/Upload/UploadFile/UploadFile';
 import UploadOptions from '../../../components/Upload/UploadOptions/UploadOptions';
 import UploadFromMegaBox from '../../../components/Upload/UploadFromMegaBox/UploadFromMegaBox';
@@ -48,18 +50,24 @@ export default function FileDetails() {
     const [Token] = useCookies(['MegaBox']);
     const queryClient = useQueryClient();
 
+    // Fetch folder contents using unified endpoint
     const GetFiles = async ({ queryKey }) => {
         const [, filterKey] = queryKey;
-        const type = filterKey.toLowerCase() !== 'all' ? filterKey : null;
-        const response = await userService.getFolderFiles(fileId, type, Token.MegaBox);
-        return response;
+        const type = filterKey.toLowerCase() !== 'all' ? filterKey : undefined;
+        const items = await getAllUnifiedItems(
+            Token.MegaBox,
+            { folderId: fileId, type },
+        );
+        return items; // Returns mixed array of files and folders
     };
     
     // Get user folders to find subfolders
     const GetFolders = async () => {
         try {
-            const foldersData = await userService.getUserFolders(Token.MegaBox);
-            return foldersData || { folders: [] };
+            const items = await getAllUnifiedItems(Token.MegaBox, { type: 'folders' });
+            // Filter to get only folders
+            const folders = items.filter(item => item.isFolder || item.itemType === 'folder');
+            return { folders };
         } catch {
             return { folders: [] };
         }
@@ -82,9 +90,24 @@ export default function FileDetails() {
         setShowUploadFromMegaBox(true);
     };
 
-    const { data, refetch, isLoading: filesLoading } = useQuery([`GetUserFile-${fileId}`, FilterKey], GetFiles, {
+    const { data: unifiedItems, refetch, isLoading: filesLoading } = useQuery([`GetUserFile-${fileId}`, FilterKey], GetFiles, {
         enabled: !!fileId && !!Token.MegaBox,
     });
+
+    // For backward compatibility, split unified items into files and folders
+    const data = React.useMemo(() => {
+        if (!unifiedItems) return { files: [], folders: [] };
+        const files = [];
+        const folders = [];
+        unifiedItems.forEach(item => {
+            if (item.isFolder || item.itemType === 'folder') {
+                folders.push(item);
+            } else {
+                files.push(item);
+            }
+        });
+        return { files, folders };
+    }, [unifiedItems]);
     
     const { data: foldersData, refetch: refetchFolders } = useQuery(['userFolders'], GetFolders, {
         enabled: !!Token.MegaBox,
@@ -438,52 +461,69 @@ export default function FileDetails() {
                             )}
                         </div>
                     ) : (
-                        <div className={`grid gap-4 sm:gap-5 md:gap-6 ${viewMode === 'grid'
-                            ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
-                            : 'grid-cols-1'
-                            }`}>
-                            {/* Display Folders First */}
-                            {subfolders.map((folder, index) => (
-                                <Folder
-                                    key={folder?._id || folder?.id || `folder-${index}`}
-                                    name={folder?.name}
-                                    data={folder}
-                                    onRename={ToggleNameChange}
-                                    onDelete={async (folderId) => {
-                                        try {
-                                            await userService.deleteFolder(folderId, Token.MegaBox);
-                                            toast.success(t("files.folderDeletedSuccess") || "Folder deleted successfully", ToastOptions("success"));
-                                            refetchFolderData();
-                                        } catch {
-                                            toast.error(t("files.folderDeleteFailed") || "Failed to delete folder", ToastOptions("error"));
-                                        }
-                                    }}
-                                    onShare={(id) => ShareFile(id, true)}
-                                    onArchive={async (folderId) => {
-                                        try {
-                                            await userService.archiveFolder(folderId, Token.MegaBox);
-                                            toast.success("Folder archived successfully", ToastOptions("success"));
-                                            refetchFolderData();
-                                        } catch {
-                                            toast.error("Failed to archive folder", ToastOptions("error"));
-                                        }
-                                    }}
-                                />
-                            ))}
-                            {/* Display Files */}
-                            {data?.files?.map((ele, index) => (
-                                <File
-                                    key={ele?._id || ele?.id || `file-${index}`}
-                                    Type={getFileCategory(ele?.fileType)}
-                                    data={ele}
-                                    Representation={Representation}
-                                    refetch={refetch}
-                                    onRename={ToggleNameChange}
-                                    onShare={(id) => ShareFile(id, false)}
-                                    viewMode={viewMode}
-                                />
-                            ))}
-                        </div>
+                        <UnifiedItemList
+                            items={unifiedItems || []}
+                            isLoading={filesLoading}
+                            viewMode={viewMode}
+                            isSelectionMode={false}
+                            selectedItems={{ files: [], folders: [] }}
+                            onToggleSelect={() => {}}
+                            onDelete={async (item) => {
+                                if (item.isFolder || item.itemType === 'folder') {
+                                    try {
+                                        await userService.deleteFolder(item._id || item.id, Token.MegaBox);
+                                        toast.success(t("files.folderDeletedSuccess") || "Folder deleted successfully", ToastOptions("success"));
+                                        refetchFolderData();
+                                    } catch {
+                                        toast.error(t("files.folderDeleteFailed") || "Failed to delete folder", ToastOptions("error"));
+                                    }
+                                } else {
+                                    try {
+                                        await fileService.deleteFile(item._id || item.id, Token.MegaBox);
+                                        toast.success(t("files.fileDeleted"), ToastOptions("success"));
+                                        refetchFolderData();
+                                    } catch {
+                                        toast.error(t("files.deleteError"), ToastOptions("error"));
+                                    }
+                                }
+                            }}
+                            onRename={ToggleNameChange}
+                            onShare={(id, isFolder) => ShareFile(id, isFolder)}
+                            onArchive={async (item) => {
+                                if (item.isFolder || item.itemType === 'folder') {
+                                    try {
+                                        await userService.archiveFolder(item._id || item.id, Token.MegaBox);
+                                        toast.success("Folder archived successfully", ToastOptions("success"));
+                                        refetchFolderData();
+                                    } catch {
+                                        toast.error("Failed to archive folder", ToastOptions("error"));
+                                    }
+                                } else {
+                                    try {
+                                        await fileService.archiveFile(item._id || item.id, Token.MegaBox);
+                                        toast.success(t("files.fileArchived"), ToastOptions("success"));
+                                        refetchFolderData();
+                                    } catch {
+                                        toast.error(t("files.archiveError"), ToastOptions("error"));
+                                    }
+                                }
+                            }}
+                            onOpenItem={(item) => {
+                                if (item.isFolder || item.itemType === 'folder') {
+                                    // Navigate to subfolder
+                                    const folderId = item._id || item.id;
+                                    const folderName = item.name || item.fileName;
+                                    navigate(`${getFilesRoute()}/${folderName}/${folderId}`);
+                                } else {
+                                    // Open file preview
+                                    const url = item.url || item.accessUrl || item._sharedUrl || item.sharedUrl || item.shareLink;
+                                    if (url) {
+                                        const fileType = item.fileType || item.type;
+                                        Representation(url, fileType);
+                                    }
+                                }
+                            }}
+                        />
                     )}
                 </div>
             </div>

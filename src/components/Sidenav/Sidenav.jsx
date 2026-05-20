@@ -29,6 +29,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useQuery, useQueryClient } from 'react-query';
 import { notificationService, userService } from '../../services';
 import { fileService } from '../../services/api';
+import { getAllUnifiedItems } from '../../services/itemsService';
 import { API_URL } from '../../services/api';
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../helpers/ToastOptions';
@@ -90,8 +91,10 @@ export default function Sidenav({ role }) {
     const GetFolders = async () => {
         if (!Token.MegaBox || role !== "User") return { folders: [] };
         try {
-            const data = await userService.getUserFolders(Token.MegaBox);
-            return data || { folders: [] };
+            const items = await getAllUnifiedItems(Token.MegaBox, { type: 'folders' });
+            // Filter to get only folders
+            const folders = items.filter(item => item.isFolder || item.itemType === 'folder');
+            return { folders };
         } catch {
             return { folders: [] };
         }
@@ -112,8 +115,10 @@ export default function Sidenav({ role }) {
     const GetFiles = async () => {
         if (!Token.MegaBox || role !== "User") return { files: [] };
         try {
-            const data = await fileService.getAllFiles(Token.MegaBox);
-            return data || { files: [] };
+            const items = await getAllUnifiedItems(Token.MegaBox);
+            // Split into files and folders for backward compatibility
+            const files = items.filter(item => !item.isFolder && item.itemType !== 'folder');
+            return { files };
         } catch {
             return { files: [] };
         }
@@ -134,13 +139,20 @@ export default function Sidenav({ role }) {
     const handleFileClick = (file) => {
         const fileCategory = getFileCategory(file?.fileType);
         const fileUrl = file?.url || file?.fileUrl;
-        
+
         if (fileCategory === 'image' || fileCategory === 'video') {
             Representation(fileUrl, file?.fileType, false);
             closeSidebar();
         } else {
+            const fileName = file?.fileName || file?.name;
+            const fileId = file?._id || file?.id;
+            // Guard against undefined fileName or fileId
+            if (!fileName || !fileId) {
+                console.error('Cannot open file: missing name or id', { fileName, fileId, file });
+                return;
+            }
             const filePath = isPromoter ? '/Promoter/file' : '/dashboard/file';
-            navigate(`${filePath}/${encodeURIComponent(file?.fileName || file?.name)}/${file?._id || file?.id}`);
+            navigate(`${filePath}/${encodeURIComponent(fileName)}/${fileId}`);
             closeSidebar();
         }
     };
@@ -152,6 +164,11 @@ export default function Sidenav({ role }) {
         }
         const folderId = folder?._id || folder?.id;
         const folderName = folder?.name;
+        // Guard against undefined folderId or folderName
+        if (!folderId || !folderName) {
+            console.error('Cannot open folder: missing id or name', { folderId, folderName, folder });
+            return;
+        }
         const filePath = isPromoter ? '/Promoter/file' : '/dashboard/file';
         navigate(`${filePath}/${encodeURIComponent(folderName)}/${folderId}`);
         closeSidebar();

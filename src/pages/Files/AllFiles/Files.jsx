@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion';
 import { Folder } from '../../../components/Folder/Folder'
 import File from '../../../components/File/File'
+import UnifiedItemList from '../../../components/UnifiedItemList/UnifiedItemList'
 import { HiOutlinePlus } from "react-icons/hi2";
 import { LuFolderPlus, LuFolder } from "react-icons/lu";
 import { HiViewGrid, HiViewList } from "react-icons/hi";
@@ -20,6 +21,7 @@ import ChangeName from '../../../components/ChangeName/ChangeName';
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../../helpers/ToastOptions';
 import { fileService, userService } from '../../../services/api';
+import { getAllUnifiedItems } from '../../../services/itemsService';
 import { useLanguage } from '../../../context/LanguageContext';
 import ShareLinkModal from '../../../components/ShareLinkModal/ShareLinkModal';
 import { useNavigate, Link } from 'react-router-dom';
@@ -189,236 +191,66 @@ export default function Files() {
         changeLanguage(newLang);
     };
 
-    const GetFiles = async ({ queryKey }) => {
+    // Unified data fetching - gets both files and folders in one call
+    const GetUnifiedItems = async ({ queryKey }) => {
         const [, filterKey] = queryKey;
         const token = Token.MegaBox;
 
         try {
-            let data;
+            const key = filterKey.toLowerCase();
 
-            switch (filterKey.toLowerCase()) {
-                case 'image':
-                    data = await fileService.getImageFiles(token);
-                    if (data?.files) {
-                        data.files = data.files.filter(file => {
-                            const isArchived = file.archived === true || file.isArchived === true;
-                            return !isArchived;
-                        });
-                    }
-                    break;
-                case 'video':
-                    data = await fileService.getVideoFiles(token);
-                    if (data?.files) {
-                        data.files = data.files.filter(file => {
-                            const isArchived = file.archived === true || file.isArchived === true;
-                            return !isArchived;
-                        });
-                    }
-                    break;
-                case 'document':
-                    data = await fileService.getDocumentFiles(token);
-                    if (data?.files) {
-                        data.files = data.files.filter(file => {
-                            const isArchived = file.archived === true || file.isArchived === true;
-                            return !isArchived;
-                        });
-                    }
-                    break;
-                case 'zip':
-                    // Get zip files and extract their contents (files and folders inside)
-                    try {
-                        const uploadedZips = await fileService.getZipFiles(token);
-                        const myZips = await fileService.getMyZips(token);
-                        const createdZips = myZips?.zips || myZips?.files || [];
-                        
-                        // Merge both types of zips and filter out archived zips
-                        // Ensure all zips have fileType set for proper categorization
-                        const allZips = [...(uploadedZips?.files || [])]
-                            .filter(zip => !zip.archived && !zip.isArchived)
-                            .map(zip => ({
-                                ...zip,
-                                fileType: zip.fileType || 'application/zip'
-                            }));
-                        const existingIds = new Set(allZips.map(f => f._id || f.id));
-                        const newZips = createdZips
-                            .filter(zip => 
-                                !existingIds.has(zip._id || zip.id) && !zip.archived && !zip.isArchived
-                            )
-                            .map(zip => ({
-                                ...zip,
-                                fileType: zip.fileType || 'application/zip', // Ensure zip type is set
-                                fileName: zip.fileName || zip.name || 'zip_file.zip'
-                            }));
-                        allZips.push(...newZips);
-                        
-                        // Extract files and folders from zip contents
-                        const zipFiles = [];
-                        const zipFolders = [];
-                        
-                        allZips.forEach(zip => {
-                            // If zip has items array (from createZip)
-                            if (zip.items && Array.isArray(zip.items)) {
-                                zip.items.forEach(item => {
-                                    if (item.type === 'file' && item.id) {
-                                        zipFiles.push({ _id: item.id, type: 'file', fromZip: zip._id || zip.id });
-                                    } else if (item.type === 'folder' && item.id) {
-                                        zipFolders.push({ _id: item.id, type: 'folder', fromZip: zip._id || zip.id });
-                                    }
-                                });
-                            }
-                            // If zip has content object (from getMyZips API response)
-                            if (zip.content && typeof zip.content === 'object') {
-                                // Extract files from content
-                                if (zip.content.files && Array.isArray(zip.content.files)) {
-                                    zip.content.files.forEach(file => {
-                                        if (file._id || file.id) {
-                                            zipFiles.push({ 
-                                                _id: file._id || file.id, 
-                                                type: 'file', 
-                                                fromZip: zip._id || zip.id 
-                                            });
-                                        }
-                                    });
-                                }
-                                // Extract folders from content
-                                if (zip.content.folders && Array.isArray(zip.content.folders)) {
-                                    zip.content.folders.forEach(folder => {
-                                        if (folder._id || folder.id) {
-                                            zipFolders.push({ 
-                                                _id: folder._id || folder.id, 
-                                                type: 'folder', 
-                                                fromZip: zip._id || zip.id 
-                                            });
-                                        }
-                                    });
-                                }
-                            }
-                            // If zip has files/folders arrays directly
-                            if (zip.files && Array.isArray(zip.files)) {
-                                zipFiles.push(...zip.files.map(f => ({ ...f, fromZip: zip._id || zip.id })));
-                            }
-                            if (zip.folders && Array.isArray(zip.folders)) {
-                                zipFolders.push(...zip.folders.map(f => ({ ...f, fromZip: zip._id || zip.id })));
-                            }
-                        });
-                        
-                        // Fetch actual file/folder data for items in zips
-                        if (zipFiles.length > 0 || zipFolders.length > 0) {
-                            // Get all user files to match with zip file IDs (use API directly to avoid circular dependency)
-                            const allUserFilesResponse = await api.get('/auth/getUserFiles', {
-                                headers: { Authorization: `Bearer ${token}` }
-                            });
-                            const allUserFiles = allUserFilesResponse.data;
-                            // Filter out archived files
-                            if (allUserFiles?.files) {
-                                allUserFiles.files = allUserFiles.files.filter(file => !file.archived && !file.isArchived);
-                            }
-                            const allUserFolders = await userService.getUserFolders(token);
-                            
-                            // Match zip file IDs with actual file data, avoiding duplicates
-                            const seenFileIds = new Set();
-                            const matchedFiles = zipFiles
-                                .map(zf => {
-                                    const file = allUserFiles?.files?.find(f => (f._id || f.id) === zf._id);
-                                    if (file) {
-                                        const fileId = file._id || file.id;
-                                        // Only add if we haven't seen this file ID before
-                                        if (fileId && !seenFileIds.has(String(fileId))) {
-                                            seenFileIds.add(String(fileId));
-                                            return { ...file, fromZip: zf.fromZip };
-                                        }
-                                    }
-                                    return null;
-                                })
-                                .filter(Boolean);
-                            
-                            // Match zip folder IDs with actual folder data, avoiding duplicates
-                            const seenFolderIds = new Set();
-                            const matchedFolders = zipFolders
-                                .map(zf => {
-                                    const folder = allUserFolders?.folders?.find(f => (f._id || f.id) === zf._id);
-                                    if (folder) {
-                                        const folderId = folder._id || folder.id;
-                                        // Only add if we haven't seen this folder ID before
-                                        if (folderId && !seenFolderIds.has(String(folderId))) {
-                                            seenFolderIds.add(String(folderId));
-                                            return { ...folder, fromZip: zf.fromZip };
-                                        }
-                                    }
-                                    return null;
-                                })
-                                .filter(Boolean);
-                            
-                            data = { files: matchedFiles, folders: matchedFolders };
-                        } else {
-                            // If no contents, just show zip files themselves (already filtered for archived and formatted)
-                            // Ensure all zip files have proper fileType for display
-                            const formattedZips = allZips.map(zip => ({
-                                ...zip,
-                                fileType: zip.fileType || 'application/zip',
-                                fileName: zip.fileName || zip.name || 'zip_file.zip'
-                            }));
-                            data = { files: formattedZips, folders: [] };
-                        }
-                    } catch {
-                        // Fallback to just uploaded zips
-                        data = await fileService.getZipFiles(token);
-                        // Filter out archived files (defensive check)
-                        if (data?.files) {
-                            data.files = data.files.filter(file => !file.archived && !file.isArchived);
-                        }
-                    }
-                    break;
-                case 'archived': {
-                    data = await fileService.getMyArchives(token);
-                    if (!data?.files) {
-                        data = { files: [] };
-                    }
-                    if (!data?.folders) {
-                        data = { ...data, folders: [] };
-                    }
-                    break;
-                }
-                case 'all':
-                default:
-                    data = await fileService.getAllFiles(token);
-                    if (data?.files) {
-                        data.files = data.files.filter(file => {
-                            const isArchived = file.archived === true || file.isArchived === true;
-                            return !isArchived;
-                        });
-                    }
-                    break;
+            // Special handling for archived items
+            if (key === 'archived') {
+                const data = await fileService.getMyArchives(token);
+                if (!data?.files) data = { files: [] };
+                if (!data?.folders) data = { ...data, folders: [] };
+                // Convert to unified array format
+                return [...(data.folders || []), ...(data.files || [])];
             }
 
-            if (filterKey.toLowerCase() !== 'archived' && data?.files) {
-                data.files = data.files.filter(file => {
-                    const isArchived = file.archived === true || file.isArchived === true;
-                    return !isArchived;
-                });
+            // For zip filter, use unified endpoint (includes both uploaded and created zips)
+            if (key === 'zip') {
+                const items = await getAllUnifiedItems(token, { type: 'zip' });
+                return items;
             }
 
-            return data || { files: [] };
-        } catch {
-            return { files: [] };
+            // For all other filters, use unified endpoint
+            // 'all' -> no type filter (gets everything)
+            // 'image', 'video', 'document', 'folders' -> pass as type filter
+            const type = key === 'all' ? undefined : key;
+            const items = await getAllUnifiedItems(token, { type });
+            return items;
+        } catch (error) {
+            console.error('Error fetching unified items:', error);
+            return [];
         }
     };
 
-    const { data, refetch, isLoading: filesLoading } = useQuery(["GetUserFiles", FilterKey], GetFiles);
-
-    const Getfolders = async () => {
-        const data = await userService.getUserFolders(Token.MegaBox);
-        // Filter out archived folders
-        if (data?.folders) {
-            data.folders = data.folders.filter(folder => {
-                const isArchived = folder.archived === true || folder.isArchived === true;
-                return !isArchived;
-            });
+    const { data: unifiedItems, refetch, isLoading: filesLoading } = useQuery(
+        ["items", FilterKey],
+        GetUnifiedItems,
+        {
+            enabled: !!Token.MegaBox,
         }
-        return data;
-    };
+    );
 
-    const { data: folders, refetch: refFolders, isLoading: foldersLoading } = useQuery("GetUserFolders", Getfolders);
+    // For backward compatibility, split unified items into files and folders
+    const data = React.useMemo(() => {
+        if (!unifiedItems) return { files: [], folders: [] };
+        const files = [];
+        const folders = [];
+        unifiedItems.forEach(item => {
+            if (item.isFolder || item.itemType === 'folder') {
+                folders.push(item);
+            } else {
+                files.push(item);
+            }
+        });
+        return { files, folders };
+    }, [unifiedItems]);
+
+    const folders = { folders: data.folders };
+    const foldersLoading = filesLoading;
     
     // Enhanced refetch function that also invalidates sidenav query
     const refetchFoldersWithSidenav = async () => {
@@ -510,8 +342,8 @@ export default function Files() {
             });
             
             // Invalidate all queries to force refetch
-            queryClient.invalidateQueries({ queryKey: ["GetUserFolders"] });
-            queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
+            queryClient.invalidateQueries({ queryKey: ["items"] });
+            queryClient.invalidateQueries({ queryKey: ["items"] });
             queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
             queryClient.invalidateQueries({ queryKey: ["userFolders"] });
             
@@ -722,8 +554,8 @@ export default function Files() {
             setSelectedItems({ files: [], folders: [] });
             
             // Invalidate all queries to force refetch
-            queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
-            queryClient.invalidateQueries({ queryKey: ["GetUserFolders"] });
+            queryClient.invalidateQueries({ queryKey: ["items"] });
+            queryClient.invalidateQueries({ queryKey: ["items"] });
             queryClient.invalidateQueries({ queryKey: ["userFolders"] });
             queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
             queryClient.invalidateQueries({ queryKey: ["getMyArchives"] });
@@ -798,8 +630,8 @@ export default function Files() {
             });
             
             // Invalidate all queries to force refetch
-            queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
-            queryClient.invalidateQueries({ queryKey: ["GetUserFolders"] });
+            queryClient.invalidateQueries({ queryKey: ["items"] });
+            queryClient.invalidateQueries({ queryKey: ["items"] });
             queryClient.invalidateQueries({ queryKey: ["userFolders"] });
             queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
             queryClient.invalidateQueries({ queryKey: ["getMyArchives"] });
@@ -826,8 +658,8 @@ export default function Files() {
             // If 404, refresh to sync with server
             if (error?.response?.status === 404) {
                 toast.warning("Some archives not found. Refreshing...", ToastOptions("warning"));
-                queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
-                queryClient.invalidateQueries({ queryKey: ["GetUserFolders"] });
+                queryClient.invalidateQueries({ queryKey: ["items"] });
+                queryClient.invalidateQueries({ queryKey: ["items"] });
                 queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
                 await refetch();
                 await refFolders();
@@ -860,7 +692,7 @@ export default function Files() {
             setSelectedItems({ files: [], folders: [] });
             // Refetch files and invalidate queries to show the new zip
             await refetch();
-            queryClient.invalidateQueries(["GetUserFiles"]);
+            queryClient.invalidateQueries(["items"]);
             refFolders();
         } catch {
             // Error is handled in the service
@@ -884,12 +716,12 @@ export default function Files() {
 
 
     const filterOptions = [
-        { key: "All", label: t("files.allFiles"), count: data?.files?.length || 0 },
+        { key: "All", label: t("files.allFiles"), count: unifiedItems?.length || 0 },
         { key: "image", label: t("files.images"), count: data?.files?.filter(f => getFileCategory(f?.fileType) === 'image')?.length || 0 },
         { key: "video", label: t("files.videos"), count: data?.files?.filter(f => getFileCategory(f?.fileType) === 'video')?.length || 0 },
         { key: "document", label: t("files.documents"), count: data?.files?.filter(f => getFileCategory(f?.fileType) === 'document')?.length || 0 },
-        { key: "zip", label: t("files.zipFolders"), count: data?.files?.filter(f => getFileCategory(f?.fileType) === 'zip')?.length || 0 },
-        { key: "archived", label: t("files.archived"), count: archivedData || 0 },
+        { key: "zip", label: t("files.zip"), count: data?.files?.filter(f => getFileCategory(f?.fileType) === 'zip')?.length || 0 },
+        { key: "folders", label: t("files.folders"), count: data?.folders?.length || 0 },
     ];
 
     return <>
@@ -1103,67 +935,12 @@ export default function Files() {
             </div>
 
             <div className="files-content max-w-7xl mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6 md:py-8">
-                <div className="mb-8 sm:mb-10 md:mb-12">
-                    <div className="flex items-center justify-between mb-4 sm:mb-5 md:mb-6">
-                        <div>
-                            <h2 className="text-xl sm:text-2xl font-semibold text-indigo-900 drop-shadow-md" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>{t("files.folders")}</h2>
-                            <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-indigo-700" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                                {foldersLoading ? t("files.loadingFolders") : `${(FilterKey === 'zip' || FilterKey === 'archived') ? (data?.folders?.length || 0) : (folders?.folders?.length || 0)} ${t("files.foldersCount")}`}
-                            </p>
-                        </div>
-                    </div>
-
-                    {foldersLoading ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-5 md:gap-6">
-                            {[...Array(4)].map((_, i) => (
-                                <div key={i} className="animate-pulse">
-                                    <div className="bg-gray-200 rounded-lg h-24 sm:h-28 md:h-32"></div>
-                                    <div className="mt-2 sm:mt-3 bg-gray-200 rounded h-3 sm:h-4 w-3/4"></div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : ((FilterKey === 'zip' || FilterKey === 'archived') ? data?.folders : folders?.folders)?.length === 0 ? (
-                        <div className="text-center py-8 sm:py-10 md:py-12 px-4">
-                            <LuFolder className="mx-auto h-10 w-10 sm:h-12 sm:w-12 text-indigo-400" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }} />
-                            <h3 className="mt-2 text-sm font-medium text-indigo-900 drop-shadow-md" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>{t("files.noFolders")}</h3>
-                            <p className="mt-1 text-xs sm:text-sm text-indigo-700 px-2" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>{t("files.noFoldersMessage")}</p>
-                            <div className="mt-4 sm:mt-6">
-                                <button
-                                    onClick={ToggleFolderAdding}
-                                    className="inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border-2 border-indigo-600 shadow-lg text-xs sm:text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 hover:border-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
-                                    style={{ textShadow: '0 2px 8px rgba(255,255,255,0.3)' }}
-                                >
-                                    <LuFolderPlus className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                    {t("files.createFolder")}
-                                </button>
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 sm:gap-5 md:gap-6">
-                            {((FilterKey === 'zip' || FilterKey === 'archived') ? data?.folders : folders?.folders)?.map((ele, index) => (
-                                <Folder
-                                    key={`${ele?._id || ele?.id || `folder-${index}`}-${index}`}
-                                    name={ele?.name}
-                                    data={ele}
-                                    onRename={(name, close, id) => ToggleNameChange(name, close, id, true)}
-                                    onDelete={DeleteFolder}
-                                    onShare={(id) => ShareFile(id, true)}
-                                    onArchive={ArchiveFolder}
-                                    isSelectionMode={isSelectionMode}
-                                    isSelected={selectedItems.folders.includes(ele?._id || ele?.id)}
-                                    onToggleSelect={toggleItemSelection}
-                                />
-                            ))}
-                        </div>
-                    )}
-                </div>
-
                 <div>
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-5 md:mb-6 gap-3 sm:gap-4">
                         <div className="flex-1 min-w-0">
-                            <h2 className="text-xl sm:text-2xl font-semibold text-indigo-900 drop-shadow-md" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>{t("files.files")}</h2>
+                            <h2 className="text-xl sm:text-2xl font-semibold text-indigo-900 drop-shadow-md" style={{ textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>{t("files.items")}</h2>
                             <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-indigo-700" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                                {filesLoading ? t("files.loadingFiles") : `${data?.files?.length || 0} ${t("files.filesCount")}`}
+                                {filesLoading ? t("files.loading") : `${unifiedItems?.length || 0} ${t("files.itemsCount")}`}
                             </p>
                         </div>
 
@@ -1259,103 +1036,70 @@ export default function Files() {
                         </div>
                     </div>
 
-                    {filesLoading ? (
-                        <div className={`grid gap-4 sm:gap-5 md:gap-6 ${viewMode === 'grid'
-                            ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
-                            : 'grid-cols-1'
-                            }`}>
-                            {[...Array(6)].map((_, i) => (
-                                <div key={i} className="animate-pulse">
-                                    <div className="bg-gray-200 rounded-lg h-24 sm:h-28 md:h-32"></div>
-                                    <div className="mt-2 sm:mt-3 bg-gray-200 rounded h-3 sm:h-4 w-3/4"></div>
-                                </div>
-                            ))}
-                        </div>
-                    ) : data?.files?.length === 0 ? (
-                        <div className="text-center py-8 sm:py-10 md:py-12 bg-white rounded-lg border-2 border-dashed border-indigo-300 px-4">
-                            <div className="mx-auto h-10 w-10 sm:h-12 sm:w-12 text-indigo-400" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.1))' }}>
-                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                            </div>
-                            <h3 className="mt-2 text-sm font-medium text-indigo-900 drop-shadow-md" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.1)' }}>{t("files.noFilesFound")}</h3>
-                            <p className="mt-1 text-xs sm:text-sm text-indigo-700 px-2" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-                                {FilterKey === 'All'
-                                    ? t("files.noFilesMessage")
-                                    : t("files.noFilesTypeMessage").replace("{type}", t(`files.${FilterKey === 'image' ? 'images' : FilterKey === 'video' ? 'videos' : FilterKey === 'document' ? 'documents' : FilterKey === 'zip' ? 'zipFolders' : 'archived'}`).toLowerCase())
+                    <UnifiedItemList
+                        items={unifiedItems || []}
+                        isLoading={filesLoading}
+                        viewMode={viewMode}
+                        isSelectionMode={isSelectionMode}
+                        selectedItems={selectedItems}
+                        onToggleSelect={toggleItemSelection}
+                        onDelete={(item) => {
+                            if (item.isFolder || item.itemType === 'folder') {
+                                DeleteFolder(item);
+                            } else {
+                                const fileId = item._id || item.id;
+                                // Implement file deletion
+                                fileService.deleteFile(fileId, Token.MegaBox)
+                                    .then(() => {
+                                        toast.success(t("files.fileDeleted"), ToastOptions("success"));
+                                        refetch();
+                                        queryClient.invalidateQueries("GetArchivedFilesCount");
+                                    })
+                                    .catch((error) => {
+                                        toast.error(t("files.deleteError"), ToastOptions("error"));
+                                    });
+                            }
+                        }}
+                        onRename={(name, close, id, isFolder) => ToggleNameChange(name, close, id, isFolder)}
+                        onShare={(id, isFolder) => ShareFile(id, isFolder)}
+                        onArchive={(item) => {
+                            if (item.isFolder || item.itemType === 'folder') {
+                                ArchiveFolder(item);
+                            } else {
+                                // Implement file archiving
+                                fileService.archiveFile(item._id || item.id, Token.MegaBox)
+                                    .then(() => {
+                                        toast.success(t("files.fileArchived"), ToastOptions("success"));
+                                        refetch();
+                                        queryClient.invalidateQueries("GetArchivedFilesCount");
+                                    })
+                                    .catch((error) => {
+                                        toast.error(t("files.archiveError"), ToastOptions("error"));
+                                    });
+                            }
+                        }}
+                        onOpenItem={(item) => {
+                            if (item.isFolder || item.itemType === 'folder') {
+                                // Navigate to folder
+                                const folderId = item._id || item.id;
+                                const folderName = item.name || item.fileName;
+                                // Guard against undefined folderId
+                                if (!folderId || !folderName) {
+                                    console.error('Cannot open folder: missing id or name', { folderId, folderName, item });
+                                    toast.error("Cannot open folder: missing folder information", ToastOptions("error"));
+                                    return;
                                 }
-                            </p>
-                            {FilterKey === 'All' && (
-                                <div className="mt-4 sm:mt-6">
-                                    <button
-                                        onClick={handleUploadClick}
-                                        className="inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border border-transparent shadow-sm text-xs sm:text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
-                                        style={{ textShadow: '0 2px 8px rgba(255,255,255,0.3)' }}
-                                    >
-                                        <HiArrowUp className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                                        {t("files.uploadFile")}
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    ) : (
-                        <div className={`grid gap-4 sm:gap-5 md:gap-6 ${viewMode === 'grid'
-                            ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5'
-                            : 'grid-cols-1'
-                            }`}>
-                            {data?.files?.map((ele, index) => {
-                                // Determine file type - ensure zip and json files are properly identified
-                                let fileType = ele?.fileType;
-                                const fileName = ele?.fileName || ele?.name || '';
-                                
-                                // Fallback: check file extension if fileType is missing or unknown
-                                if (!fileType || fileType === 'unknown' || !getFileCategory(fileType)) {
-                                    const fileExt = fileName.split('.').pop()?.toLowerCase();
-                                    if (fileExt === 'zip') {
-                                        fileType = 'application/zip';
-                                    } else if (fileExt === 'json') {
-                                        fileType = 'application/json';
-                                    }
+                                navigate(`/dashboard/file/${encodeURIComponent(folderName)}/${folderId}`);
+                            } else {
+                                // Open file preview
+                                const url = item.url || item.accessUrl || item._sharedUrl || item.sharedUrl || item.shareLink;
+                                if (url) {
+                                    const fileType = item.fileType || item.type;
+                                    Representation(url, fileType);
                                 }
-                                
-                                // Ensure zip files always have the correct fileType
-                                if (fileName.toLowerCase().endsWith('.zip') && fileType !== 'application/zip') {
-                                    fileType = 'application/zip';
-                                }
-                                
-                                // Ensure json files always have the correct fileType
-                                if (fileName.toLowerCase().endsWith('.json') && fileType !== 'application/json') {
-                                    fileType = 'application/json';
-                                }
-                                
-                                // Regular file display
-                                const fileData = { ...ele, fileType: fileType || ele?.fileType };
-                                const fileCategory = getFileCategory(fileData.fileType);
-                                
-                                // If category is still unknown, treat as document for display purposes
-                                const displayType = fileCategory === 'unknown' ? 'document' : fileCategory;
-                                
-                                return (
-                                    <File
-                                        key={`${ele?._id || ele?.id || `file-${index}`}-${index}`}
-                                        Type={displayType}
-                                        data={fileData}
-                                        Representation={Representation}
-                                        refetch={() => {
-                                            refetch();
-                                            queryClient.invalidateQueries("GetArchivedFilesCount");
-                                        }}
-                                        onRename={ToggleNameChange}
-                                        onShare={ShareFile}
-                                        viewMode={viewMode}
-                                        isSelectionMode={isSelectionMode}
-                                        isSelected={selectedItems.files.includes(ele?._id || ele?.id)}
-                                        onToggleSelect={toggleItemSelection}
-                                    />
-                                );
-                            })}
-                        </div>
-                    )}
+                            }
+                        }}
+                    />
                 </div>
             </div>
         </div>

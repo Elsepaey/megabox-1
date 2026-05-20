@@ -13,6 +13,7 @@ import { useCookies } from 'react-cookie';
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../helpers/ToastOptions';
 import { API_URL, fileService } from '../../services/api';
+import { itemsService } from '../../services/itemsService';
 import { useQueryClient } from 'react-query';
 import { useLanguage } from '../../context/LanguageContext';
 import { useNavigate } from 'react-router-dom';
@@ -30,12 +31,16 @@ const getDocumentIcon = (fileName) => {
 const typeConfig = {
     image: {
         icon: <IoImageSharp className='text-secondary-600 w-[25px] h-[25px]' />,
-        previewStyle: (url) => ({
-            backgroundImage: `url(${url})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat'
-        }),
+        previewStyle: (url, fileName, data) => {
+            // Use thumbnail if available, fallback to full image
+            const imageUrl = data?.thumbnailUrl || url;
+            return {
+                backgroundImage: `url(${imageUrl})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat'
+            };
+        },
     },
     video: {
         icon: <RiFolderVideoFill className='text-secondary-600 w-[25px] h-[25px]' />,
@@ -46,23 +51,71 @@ const typeConfig = {
             alignItems: 'center',
             justifyContent: 'center'
         }),
-        previewComponent: (url) => (
-            <div className="w-full h-full relative bg-black flex items-center justify-center" style={{ zIndex: 1, position: 'relative', pointerEvents: 'none' }}>
-                <video
-                    src={url}
-                    className="w-full h-full object-cover"
-                    muted
-                    preload="metadata"
-                    playsInline
-                    style={{ zIndex: 1, position: 'relative', pointerEvents: 'none' }}
-                />
-                <div className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/10 transition-colors" style={{ zIndex: 2, position: 'absolute', pointerEvents: 'none' }}>
-                    <div className="bg-white/20 backdrop-blur-sm rounded-full p-4 border-4 border-white/40 shadow-2xl transform hover:scale-110 transition-transform" style={{ pointerEvents: 'none' }}>
-                        <FaPlay className="w-8 h-8 text-white ml-1" />
+        previewComponent: (url, fileName, data) => {
+            // Use thumbnail image if available, otherwise show video preview
+            if (data?.thumbnailUrl) {
+                return (
+                    <div className="w-full h-full relative bg-black flex items-center justify-center" style={{ zIndex: 1, position: 'relative', pointerEvents: 'none' }}>
+                        <img
+                            src={data.thumbnailUrl}
+                            alt={fileName || 'Video thumbnail'}
+                            className="w-full h-full object-cover"
+                            style={{ zIndex: 1, position: 'relative', pointerEvents: 'none' }}
+                            onError={(e) => {
+                                // Fallback to video preview if thumbnail fails to load
+                                e.target.style.display = 'none';
+                                const videoEl = e.target.parentElement.querySelector('video');
+                                if (videoEl) videoEl.style.display = 'block';
+                            }}
+                        />
+                        <video
+                            src={url}
+                            className="w-full h-full object-cover"
+                            muted
+                            preload="metadata"
+                            playsInline
+                            style={{ zIndex: 1, position: 'relative', pointerEvents: 'none', display: 'none' }}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/10 transition-colors" style={{ zIndex: 2, position: 'absolute', pointerEvents: 'none' }}>
+                            <div className="bg-white/20 backdrop-blur-sm rounded-full p-4 border-4 border-white/40 shadow-2xl transform hover:scale-110 transition-transform" style={{ pointerEvents: 'none' }}>
+                                <FaPlay className="w-8 h-8 text-white ml-1" />
+                            </div>
+                        </div>
+                        {/* Show processing badge if video is not ready */}
+                        {data?.readyToStream === false && (
+                            <div className="absolute top-2 right-2 px-2 py-1 bg-yellow-500 text-white text-xs font-semibold rounded-md shadow-lg" style={{ zIndex: 3 }}>
+                                Processing...
+                            </div>
+                        )}
                     </div>
+                );
+            }
+
+            // Fallback to video preview
+            return (
+                <div className="w-full h-full relative bg-black flex items-center justify-center" style={{ zIndex: 1, position: 'relative', pointerEvents: 'none' }}>
+                    <video
+                        src={url}
+                        className="w-full h-full object-cover"
+                        muted
+                        preload="metadata"
+                        playsInline
+                        style={{ zIndex: 1, position: 'relative', pointerEvents: 'none' }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/10 transition-colors" style={{ zIndex: 2, position: 'absolute', pointerEvents: 'none' }}>
+                        <div className="bg-white/20 backdrop-blur-sm rounded-full p-4 border-4 border-white/40 shadow-2xl transform hover:scale-110 transition-transform" style={{ pointerEvents: 'none' }}>
+                            <FaPlay className="w-8 h-8 text-white ml-1" />
+                        </div>
+                    </div>
+                    {/* Show processing badge if video is not ready */}
+                    {data?.readyToStream === false && (
+                        <div className="absolute top-2 right-2 px-2 py-1 bg-yellow-500 text-white text-xs font-semibold rounded-md shadow-lg" style={{ zIndex: 3 }}>
+                            Processing...
+                        </div>
+                    )}
                 </div>
-            </div>
-        ),
+            );
+        },
     },
     document: {
         icon: <IoDocumentsSharp className='text-secondary-600 w-[25px] h-[25px]' />,
@@ -153,7 +206,7 @@ const typeConfig = {
     }
 };
 
-export default function File({ Type, data, Representation, onRename, refetch, onShare, viewMode, isSelectionMode, isSelected, onToggleSelect }) {
+export default function File({ Type, data, Representation, onRename, refetch, onShare, viewMode, isSelectionMode, isSelected, onToggleSelect, onOpen }) {
 
     const [showMenu, setShowMenu] = useState(false);
     const { url, createdAt, fileName, fileType, _id } = data;
@@ -195,11 +248,15 @@ export default function File({ Type, data, Representation, onRename, refetch, on
         };
     }, [showMenu]);
 
-    const handleOpenFile = () => {
-        const fileUrl = url || data?._sharedUrl || data?.sharedUrl || data?.shareLink;
-
+    const handleOpenFile = async () => {
         if (Type === 'zip') {
             setShowMenu(false);
+            // Guard against undefined fileName or _id
+            if (!fileName || !_id) {
+                console.error('Cannot open zip: missing fileName or _id', { fileName, _id, data });
+                toast.error("Cannot open file: missing file information", ToastOptions("error"));
+                return;
+            }
             const currentPath = window.location.pathname;
             let basePath = '/dashboard';
             if (currentPath.startsWith('/Promoter')) {
@@ -211,17 +268,34 @@ export default function File({ Type, data, Representation, onRename, refetch, on
             return;
         }
 
+        // Try to get a fresh signed URL from the new file-details endpoint.
+        // The URL on the listing is short-lived; refetching avoids 403s on
+        // images that have been visible for a while.
+        let fileUrl = url || data?._sharedUrl || data?.sharedUrl || data?.shareLink;
+        let resolvedType = fileType;
+        if (_id && MegaBox?.MegaBox) {
+            try {
+                const details = await itemsService.getFileDetails(MegaBox.MegaBox, _id);
+                if (details?.accessUrl) fileUrl = details.accessUrl;
+                if (details?.fileType) resolvedType = details.fileType;
+            } catch (e) {
+                // Non-fatal — fall back to the listing URL.
+                console.warn('getFileDetails failed, using listing url', e);
+            }
+        }
+
         if (!fileUrl) {
             toast.error("File URL not available", ToastOptions("error"));
             return;
         }
 
-        if (Type === 'image') {
-            Representation(fileUrl, fileType);
-        } else if (Type === 'video') {
-            Representation(fileUrl, fileType);
-        } else if (Type === 'document') {
-            Representation(fileUrl, fileType);
+        if (Type === 'image' || Type === 'video' || Type === 'document') {
+            // Use onOpen callback if provided (UnifiedItemList), otherwise use Representation (old Files.jsx)
+            if (onOpen) {
+                onOpen(data);
+            } else if (Representation) {
+                Representation(fileUrl, resolvedType);
+            }
         }
     };
 
@@ -708,9 +782,9 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                     </div>
                     <div className="w-32 h-24 flex-shrink-0 rounded overflow-hidden relative" style={{ zIndex: 1, pointerEvents: 'none' }}>
                         {config.previewComponent ? (
-                            config.previewComponent(url, fileName)
+                            config.previewComponent(url, fileName, data)
                         ) : (
-                            <div style={config.previewStyle(url, fileName)} className="w-full h-full" />
+                            <div style={config.previewStyle(url, fileName, data)} className="w-full h-full" />
                         )}
                     </div>
                     <div className="flex-shrink-0 text-right">
@@ -725,9 +799,9 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                     </div>
                     <div className="w-full h-[200px] overflow-hidden relative" style={{ zIndex: 1, pointerEvents: 'none' }}>
                         {config.previewComponent ? (
-                            config.previewComponent(url, fileName)
+                            config.previewComponent(url, fileName, data)
                         ) : (
-                            <div style={config.previewStyle(url, fileName)} className="w-full h-full" />
+                            <div style={config.previewStyle(url, fileName, data)} className="w-full h-full" />
                         )}
                     </div>
                     <div className="w-full h-[60px] flex justify-end items-center p-2">

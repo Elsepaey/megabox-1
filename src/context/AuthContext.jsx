@@ -4,6 +4,8 @@ import { useCookies } from 'react-cookie';
 import { getFCMToken } from '../utils/fcmToken';
 import { jwtDecode } from 'jwt-decode';
 import { useQueryClient } from 'react-query';
+import { authStorage } from '../services/authStorage';
+import { setAuthFailureHandler } from '../services/apiConfig';
 
 const AuthContext = createContext(null);
 
@@ -12,6 +14,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [tempEmail, setTempEmail] = useState('');
+  const [needsEmailVerification, setNeedsEmailVerification] = useState(false);
   const [UserRole, setUserRole] = useState('')
   const [UserRefLink, setUserRefLink] = useState('')
 
@@ -24,7 +27,8 @@ export const AuthProvider = ({ children }) => {
   const getUserRole = async (id) => {
     try {
       setError(null)
-      const role = await authService.userRole(id);
+      const token = cookies.MegaBox;
+      const role = await authService.userRole(id, token);
 
       setUserRole(role?.role);
       setUserRefLink(role?.referralLink);
@@ -67,47 +71,75 @@ export const AuthProvider = ({ children }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cookies.MegaBox]);
 
+  /**
+   * Persist tokens + user from a `{ accessToken, refreshToken, user }`
+   * response shape (login + verify-OTP both return this).
+   *
+   * The access token lives in the `MegaBox` cookie (read elsewhere via
+   * react-cookie) and the refresh token in localStorage (used only by
+   * /auth/refresh and /auth/logout).
+   */
+  const persistAuthSuccess = async (data) => {
+    const accessToken = data?.accessToken;
+    const refreshToken = data?.refreshToken;
+    const u = data?.user;
+    if (!accessToken) return null;
+
+    setToken("MegaBox", accessToken, { path: '/', maxAge: 30 * 24 * 60 * 60 });
+    if (refreshToken) authStorage.setRefreshToken(refreshToken);
+    setUser(u || null);
+    setUserRole(u?.role || '');
+    setUserRefLink(u?.referralLink || '');
+
+    try {
+      const fcmToken = await getFCMToken();
+      if (fcmToken && u?._id) {
+        await notificationService.saveFcmToken(u._id, fcmToken);
+      }
+    } catch {
+      // FCM is optional.
+    }
+
+    return accessToken;
+  };
+
   const login = async (email, password) => {
     try {
       setLoading(true);
       setError(null);
-      const response = await authService.login(email, password);
+      setNeedsEmailVerification(false);
 
-      setUser(response);
-
-      if (response?.message === "Done") {
-        setToken("MegaBox", response?.data?.access_Token);
-        setUserRole(response?.data?.checkUser?.role);
-        setUserRefLink(response?.data?.checkUser?.referralLink);
-        
-        // Save FCM token for push notifications (if available)
-        try {
-          const fcmToken = await getFCMToken();
-          if (fcmToken && response?.data?.checkUser?._id) {
-            await notificationService.saveFcmToken(
-              response.data.checkUser._id,
-              fcmToken
-            );
-          }
-        } catch {
-          // Silently fail - FCM token is optional
-        }
-      }
+      const data = await authService.login(email, password);
+      console.log('[auth] AuthContext got data', {
+        keys: Object.keys(data || {}),
+        hasAccessToken: !!data?.accessToken,
+        hasUser: !!data?.user,
+        message: data?.message,
+      });
+      const accessToken = await persistAuthSuccess(data);
+      console.log('[auth] persistAuthSuccess returned', !!accessToken);
 
       setLoading(false);
-      return response?.data?.access_Token;
+      return accessToken || false;
     } catch (err) {
-      setError(err.message || 'Login failed');
       setLoading(false);
+      // Email-not-verified branch — let the page route to /confirm-email.
+      if (err?.needsEmailVerification) {
+        setTempEmail(err.email || email);
+        setNeedsEmailVerification(true);
+        setError(null);
+        return { needsEmailVerification: true, email: err.email || email };
+      }
+      setError(err.message || err?.error || 'Login failed');
       return false;
     }
   };
 
-  const signup = async (username, email, password, confirmationPassword) => {
+  const signup = async (username, email, password, confirmationPassword, privacyPolicyVersion = null) => {
     try {
       setLoading(true);
       setError(null);
-      await authService.signup(username, email, password, confirmationPassword);
+      await authService.signup(username, email, password, confirmationPassword, privacyPolicyVersion);
       setTempEmail(email);
       setLoading(false);
       return true;
@@ -119,11 +151,11 @@ export const AuthProvider = ({ children }) => {
   };
 
 
-  const signupWithRef = async (username, email, password, confirmationPassword, ref) => {
+  const signupWithRef = async (username, email, password, confirmationPassword, ref, privacyPolicyVersion = null) => {
     try {
       setLoading(true);
       setError(null);
-      await authService.signupWithRef(username, email, password, confirmationPassword, ref);
+      await authService.signupWithRef(username, email, password, confirmationPassword, ref, privacyPolicyVersion);
       setTempEmail(email);
       setLoading(false);
       return true;
@@ -182,7 +214,13 @@ export const AuthProvider = ({ children }) => {
     try {
       setLoading(true);
       setError(null);
-      await authService.confirmOTP(code, email);
+      // The new backend issues tokens on successful verify, so we treat this
+      // as an auto-login.
+      const data = await authService.confirmOTP(code, email);
+      if (data?.accessToken) {
+        await persistAuthSuccess(data);
+        setNeedsEmailVerification(false);
+      }
       setLoading(false);
       return true;
     } catch (err) {
@@ -251,48 +289,56 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
-  // Centralized logout function
+  // Centralized logout function — server first (best-effort), then local.
   const logout = async () => {
-    try {
-      const token = cookies.MegaBox;
-      
-      // Delete FCM token on logout
-      if (token) {
-        try {
-          await notificationService.deleteFcmToken(token);
-        } catch (error) {
-          // Silently fail - FCM token deletion is optional
-          console.warn('Failed to delete FCM token:', error);
-        }
+    const token = cookies.MegaBox;
+
+    // FCM token cleanup (best-effort)
+    if (token) {
+      try {
+        await notificationService.deleteFcmToken(token);
+      } catch (e) {
+        console.warn('Failed to delete FCM token:', e);
       }
-    } catch (error) {
-      // Continue with logout even if FCM token deletion fails
-      console.warn('Error during logout cleanup:', error);
     }
-    
-    // Clear React Query cache
+
+    // Server-side logout — invalidates the refresh token. Best-effort.
+    try {
+      await authService.logout();
+    } catch (e) {
+      console.warn('Server logout failed:', e);
+    }
+
     queryClient.clear();
-    
-    // Clear all auth state
     setUser(null);
     setUserRole('');
     setUserRefLink('');
     setTempEmail('');
+    setNeedsEmailVerification(false);
     setError(null);
-    
-    // Remove cookie with all necessary options
-    removeToken("MegaBox", {
-      path: '/',
-    });
-    
-    // Also try to remove cookie manually as a fallback (multiple attempts to ensure it's cleared)
+
+    removeToken("MegaBox", { path: '/' });
+    authStorage.clear();
+
+    // Belt-and-braces fallback for stale cookies on different paths/domains.
     document.cookie = "MegaBox=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
     document.cookie = "MegaBox=; path=/; domain=" + window.location.hostname + "; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
-    // Try without domain for localhost
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      document.cookie = "MegaBox=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
-    }
   }
+
+  // Wire the apiConfig refresh-failure handler so a failed /auth/refresh wipes
+  // local auth state (the user lands on /login next render via protectors).
+  useEffect(() => {
+    setAuthFailureHandler(() => {
+      authStorage.clear();
+      removeToken("MegaBox", { path: '/' });
+      queryClient.clear();
+      setUser(null);
+      setUserRole('');
+      setUserRefLink('');
+    });
+    return () => setAuthFailureHandler(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <AuthContext.Provider value={{
@@ -300,6 +346,9 @@ export const AuthProvider = ({ children }) => {
       loading,
       error,
       tempEmail,
+      setTempEmail,
+      needsEmailVerification,
+      setNeedsEmailVerification,
       login,
       signup,
       sendResetCode,
