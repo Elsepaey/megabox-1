@@ -8,10 +8,12 @@ import { LuFolderOpen } from "react-icons/lu";
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../../helpers/ToastOptions';
 import { useCookies } from 'react-cookie';
-import { API_URL, fileService, userService, channelService } from '../../../services/api';
+import { fileService } from '../../../services/api';
+import { uploadOrchestrator } from '../../../services/uploadOrchestrator';
 import { HiArrowPath } from "react-icons/hi2";
 import { HiTrash } from "react-icons/hi2";
 import { HiCheckCircle } from "react-icons/hi2";
+import { HiPlay, HiPause } from "react-icons/hi2";
 import { useLanguage } from '../../../context/LanguageContext';
 
 export default function UploadFile({ ToggleUploadFile, refetch, insideFile, id, isChannel }) {
@@ -22,6 +24,7 @@ export default function UploadFile({ ToggleUploadFile, refetch, insideFile, id, 
     const [FileType, setFileType] = useState("All");
     const [selectedFiles, setSelectedFiles] = useState([]);
     const [uploadProgress, setUploadProgress] = useState({});
+    const [uploadDetails, setUploadDetails] = useState({});
     const [UploadLoading, setUploadLoading] = useState(false);
 
     const SelectFileType = (Type) => setFileType(Type);
@@ -87,10 +90,83 @@ export default function UploadFile({ ToggleUploadFile, refetch, insideFile, id, 
     const ClearAllFiles = () => {
         setSelectedFiles([]);
         setUploadProgress({});
+        setUploadDetails({});
         if (ref.current) {
             ref.current.value = '';
         }
     }
+
+    const pauseUpload = (index) => {
+        const detail = uploadDetails[index];
+        if (!detail?.fileId) return;
+
+        uploadOrchestrator.pauseUpload(detail.fileId, { isVideo: detail.isVideo });
+        setUploadDetails(prev => ({
+            ...prev,
+            [index]: { ...prev[index], paused: true }
+        }));
+    };
+
+    const resumeUpload = async (index) => {
+        const file = selectedFiles[index];
+        const detail = uploadDetails[index];
+        if (!detail?.fileId) return;
+
+        setUploadDetails(prev => ({
+            ...prev,
+            [index]: { ...prev[index], paused: false }
+        }));
+
+        try {
+            const uploadOpts = {
+                onProgress: (sent, total) => {
+                    const progress = Math.round((sent / total) * 100);
+                    setUploadDetails(prev => ({
+                        ...prev,
+                        [index]: { ...prev[index], progress, bytesUploaded: sent, totalBytes: total }
+                    }));
+                },
+                onVideoDetected: (isVideo, fileId) => {
+                    setUploadDetails(prev => ({
+                        ...prev,
+                        [index]: { ...prev[index], isVideo, fileId }
+                    }));
+                },
+                onInit: (initData) => {
+                    setUploadDetails(prev => ({
+                        ...prev,
+                        [index]: {
+                            ...prev[index],
+                            isVideo: initData.isVideo,
+                            fileId: initData.fileId
+                        }
+                    }));
+                }
+            };
+
+            if (isChannel && id) uploadOpts.channelId = id;
+            else if (insideFile) uploadOpts.folderId = id;
+
+            const data = await fileService.uploadFile(file, Token.MegaBox, uploadOpts);
+
+            if (data === true) {
+                setUploadProgress(prev => ({ ...prev, [index]: 'success' }));
+                setUploadDetails(prev => ({ ...prev, [index]: { ...prev[index], progress: 100 } }));
+            } else {
+                setUploadProgress(prev => ({ ...prev, [index]: 'error' }));
+            }
+        } catch {
+            setUploadProgress(prev => ({ ...prev, [index]: 'error' }));
+        }
+    };
+
+    const cancelUpload = (index) => {
+        const detail = uploadDetails[index];
+        if (!detail?.fileId) return;
+
+        uploadOrchestrator.cancelUpload(detail.fileId, { isVideo: detail.isVideo });
+        RemoveFile(index);
+    };
 
     const AddFiles = async () => {
         if (selectedFiles.length === 0) {
@@ -105,24 +181,47 @@ export default function UploadFile({ ToggleUploadFile, refetch, insideFile, id, 
         // Upload files sequentially
         for (let i = 0; i < selectedFiles.length; i++) {
             const file = selectedFiles[i];
-            
+
             try {
                 setUploadProgress(prev => ({ ...prev, [i]: 'uploading' }));
 
-                let data;
-                if (isChannel && id) {
-                    // Upload file to channel
-                    data = await channelService.createFileInChannel(file, id, Token.MegaBox);
-                } else if (insideFile) {
-                    // Upload file to folder
-                    data = await userService.createFileInFolder(id, file, Token.MegaBox);
-                } else {
-                    // Upload file to root
-                    data = await fileService.uploadFile(file, Token.MegaBox);
-                }
+                const uploadOpts = {
+                    onProgress: (sent, total) => {
+                        const progress = Math.round((sent / total) * 100);
+                        setUploadDetails(prev => ({
+                            ...prev,
+                            [i]: { ...prev[i], progress, bytesUploaded: sent, totalBytes: total }
+                        }));
+                    },
+                    onVideoDetected: (isVideo, fileId) => {
+                        setUploadDetails(prev => ({
+                            ...prev,
+                            [i]: { ...prev[i], isVideo, fileId }
+                        }));
+                    },
+                    onInit: (initData) => {
+                        setUploadDetails(prev => ({
+                            ...prev,
+                            [i]: {
+                                progress: 0,
+                                paused: false,
+                                isVideo: initData.isVideo,
+                                fileId: initData.fileId,
+                                bytesUploaded: 0,
+                                totalBytes: file.size
+                            }
+                        }));
+                    }
+                };
 
-                if (data === true || data?.message === "✅ تم رفع الملف بنجاح") {
+                if (isChannel && id) uploadOpts.channelId = id;
+                else if (insideFile) uploadOpts.folderId = id;
+
+                const data = await fileService.uploadFile(file, Token.MegaBox, uploadOpts);
+
+                if (data === true) {
                     setUploadProgress(prev => ({ ...prev, [i]: 'success' }));
+                    setUploadDetails(prev => ({ ...prev, [i]: { ...prev[i], progress: 100 } }));
                     successCount++;
                 } else {
                     setUploadProgress(prev => ({ ...prev, [i]: 'error' }));
@@ -260,7 +359,38 @@ export default function UploadFile({ ToggleUploadFile, refetch, insideFile, id, 
                                     </div>
                                     <div className="flex items-center gap-2">
                                         {uploadProgress[index] === 'uploading' && (
-                                            <HiArrowPath className='h-5 w-5 text-white animate-spin' />
+                                            <>
+                                                <div className="flex-1 min-w-[120px]">
+                                                    <div className="bg-white/20 rounded-full h-2 mb-1">
+                                                        <div
+                                                            className="bg-white h-2 rounded-full transition-all"
+                                                            style={{ width: `${uploadDetails[index]?.progress || 0}%` }}
+                                                        />
+                                                    </div>
+                                                    <div className="flex justify-between text-xs text-white/70">
+                                                        <span>{uploadDetails[index]?.progress || 0}%</span>
+                                                        <span>
+                                                            {formatFileSize(uploadDetails[index]?.bytesUploaded || 0)} /
+                                                            {formatFileSize(uploadDetails[index]?.totalBytes || file.size)}
+                                                        </span>
+                                                    </div>
+                                                    {uploadDetails[index]?.isVideo && (
+                                                        <span className="text-xs text-white/60">TUS</span>
+                                                    )}
+                                                </div>
+                                                <button
+                                                    onClick={() => uploadDetails[index]?.paused ? resumeUpload(index) : pauseUpload(index)}
+                                                    className="text-white hover:text-white/80"
+                                                >
+                                                    {uploadDetails[index]?.paused ? <HiPlay className="h-5 w-5" /> : <HiPause className="h-5 w-5" />}
+                                                </button>
+                                                <button
+                                                    onClick={() => cancelUpload(index)}
+                                                    className="text-white/80 hover:text-red-300"
+                                                >
+                                                    <HiX className="h-5 w-5" />
+                                                </button>
+                                            </>
                                         )}
                                         {uploadProgress[index] === 'success' && (
                                             <HiCheckCircle className='h-5 w-5 text-green-300' />
@@ -268,10 +398,12 @@ export default function UploadFile({ ToggleUploadFile, refetch, insideFile, id, 
                                         {uploadProgress[index] === 'error' && (
                                             <span className="text-red-300 text-xs">{t('uploadFromMegaBox.failed') || 'Failed'}</span>
                                         )}
-                                        <HiTrash
-                                            className='h-5 w-5 text-white cursor-pointer hover:text-white/80 transition-colors'
-                                            onClick={() => RemoveFile(index)}
-                                        />
+                                        {!uploadProgress[index] && (
+                                            <HiTrash
+                                                className='h-5 w-5 text-white cursor-pointer hover:text-white/80 transition-colors'
+                                                onClick={() => RemoveFile(index)}
+                                            />
+                                        )}
                                     </div>
                                 </div>
                             ))}

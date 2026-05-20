@@ -62,7 +62,12 @@ export const channelService = {
         }
     },
 
-    // Create file in a channel
+    /**
+     * Create file in a channel
+     * @deprecated Use fileService.uploadFile(file, token, { channelId }) instead.
+     * This method uses legacy direct FormData upload. The new unified system
+     * supports chunked R2 uploads and TUS video uploads with pause/resume.
+     */
     createFileInChannel: async (file, channelId, token) => {
         try {
             const formData = new FormData();

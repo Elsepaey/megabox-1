@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
 // eslint-disable-next-line no-unused-vars
@@ -7,12 +7,34 @@ import GoogleIcon from "./GoogleIcon";
 import { RiEyeFill, RiEyeCloseLine } from "react-icons/ri";
 import GoogleLoginButton from './GoogleLoginButton';
 import { useLanguage } from '../../context/LanguageContext';
+import PrivacyTermsModal from '../../components/PrivacyTermsModal/PrivacyTermsModal';
+import { privacyTermsService } from '../../services';
 import "./Auth.scss";
 
 const Signup = ({ onLogin, onConfirmMail, loading, error }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [privacyPolicyVersion, setPrivacyPolicyVersion] = useState(null);
+
+  // Fetch privacy policy version on component mount (like Flutter's onInit)
+  useEffect(() => {
+    const fetchPrivacyVersion = async () => {
+      try {
+        const data = await privacyTermsService.getPrivacyPolicy(language);
+        if (data?.policy?.version) {
+          console.log('Privacy version fetched:', data.policy.version);
+          setPrivacyPolicyVersion(data.policy.version);
+        }
+      } catch (error) {
+        console.warn('Failed to fetch privacy version:', error.message);
+        // Version remains null if API fails, like Flutter
+      }
+    };
+
+    fetchPrivacyVersion();
+  }, [language]);
 
 
 
@@ -21,7 +43,8 @@ const Signup = ({ onLogin, onConfirmMail, loading, error }) => {
     username: "",
     email: "",
     password: "",
-    confirmationPassword: ""
+    confirmationPassword: "",
+    acceptedPrivacy: false
   };
 
   const validationSchema = Yup.object({
@@ -36,12 +59,14 @@ const Signup = ({ onLogin, onConfirmMail, loading, error }) => {
       .min(8, t('auth.passwordMin')),
     confirmationPassword: Yup.string()
       .required(t('auth.confirmPasswordRequired'))
-      .oneOf([Yup.ref('password')], t('auth.passwordsMatch'))
+      .oneOf([Yup.ref('password')], t('auth.passwordsMatch')),
+    acceptedPrivacy: Yup.boolean()
+      .oneOf([true], t('auth.privacyPolicyRequired'))
   });
 
   const handleSubmit = async (values, { setSubmitting, setErrors }) => {
     try {
-      await onConfirmMail(values);
+      await onConfirmMail({ ...values, privacyPolicyVersion });
     } catch (err) {
       setErrors({ submit: err.message });
     } finally {
@@ -159,6 +184,58 @@ const Signup = ({ onLogin, onConfirmMail, loading, error }) => {
                 </button>
                 <ErrorMessage name="confirmationPassword" component="div" className="auth-error" />
               </motion.div>
+              <motion.div
+                className="auth-field auth-privacy-checkbox"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.5, delay: 0.7 }}
+              >
+                <div className="privacy-checkbox-wrapper">
+                  <Field name="acceptedPrivacy">
+                    {({ field }) => (
+                      <>
+                        <div className="custom-checkbox-container">
+                          <input
+                            type="checkbox"
+                            id="acceptedPrivacy"
+                            {...field}
+                            checked={field.value}
+                            className="custom-checkbox-input"
+                          />
+                          <label htmlFor="acceptedPrivacy" className="custom-checkbox-label">
+                            <span className="checkbox-box">
+                              {field.value && (
+                                <svg viewBox="0 0 16 16" className="checkbox-check">
+                                  <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+                                </svg>
+                              )}
+                            </span>
+                            <span className="checkbox-text">
+                              {t('auth.iAgreeTo')}{' '}
+                              <button
+                                type="button"
+                                className="privacy-link"
+                                onClick={() => setShowPrivacyModal(true)}
+                              >
+                                {t('auth.privacyPolicy')}
+                              </button>
+                              {' & '}
+                              <button
+                                type="button"
+                                className="privacy-link"
+                                onClick={() => setShowPrivacyModal(true)}
+                              >
+                                {t('auth.termsOfService')}
+                              </button>
+                            </span>
+                          </label>
+                        </div>
+                        <ErrorMessage name="acceptedPrivacy" component="div" className="auth-error" />
+                      </>
+                    )}
+                  </Field>
+                </div>
+              </motion.div>
               {errors.submit && (
                 <motion.div
                   className="auth-error"
@@ -198,6 +275,11 @@ const Signup = ({ onLogin, onConfirmMail, loading, error }) => {
           <span onClick={onLogin}>{t('auth.alreadyHaveAccount')} {t('auth.login')}</span>
         </motion.div>
       </motion.div>
+
+      <PrivacyTermsModal
+        isOpen={showPrivacyModal}
+        onClose={() => setShowPrivacyModal(false)}
+      />
     </div>
   );
 };

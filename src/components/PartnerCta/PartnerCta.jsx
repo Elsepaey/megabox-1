@@ -89,7 +89,7 @@ export default function PartnerCTA({ isModal = false, onClose }) {
 
     const fetchUserData = async () => {
         try {
-            const response = await api.get('/user/Getloginuseraccount', {
+            const response = await api.get('/users/profile', {
                 headers: {
                     Authorization: `Bearer ${cookies.MegaBox}`
                 }
