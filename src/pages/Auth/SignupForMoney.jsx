@@ -1,18 +1,42 @@
 import React, { useEffect, useState } from "react";
 import { Formik, Form, Field, ErrorMessage } from "formik";
 import * as Yup from "yup";
+import { motion } from "framer-motion";
 import { RiEyeFill, RiEyeCloseLine } from "react-icons/ri";
 import "./Auth.scss";
 import { useNavigate } from "react-router-dom";
 import Loading from "../../components/Loading/Loading";
 import { useAuth } from "../../context/AuthContext";
+import { useLanguage } from '../../context/LanguageContext';
+import PrivacyTermsModal from '../../components/PrivacyTermsModal/PrivacyTermsModal';
+import { privacyTermsService } from '../../services';
 
 const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => {
+    const { t, language } = useLanguage();
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
+    const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+    const [privacyPolicyVersion, setPrivacyPolicyVersion] = useState(null);
 
     const { getUserRole } = useAuth();
+
+    // Fetch privacy policy version on component mount (like Flutter's onInit)
+    useEffect(() => {
+        const fetchPrivacyVersion = async () => {
+            try {
+                const data = await privacyTermsService.getPrivacyPolicy(language);
+                if (data?.policy?.version) {
+                    console.log('Privacy version fetched:', data.policy.version);
+                    setPrivacyPolicyVersion(data.policy.version);
+                }
+            } catch (error) {
+                console.warn('Failed to fetch privacy version:', error.message);
+                // Version remains null if API fails, like Flutter
+            }
+        };
+
+        fetchPrivacyVersion();
+    }, [language]);
 
     const navigate = useNavigate()
 
@@ -20,27 +44,30 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
         username: "",
         email: "",
         password: "",
-        confirmationPassword: ""
+        confirmationPassword: "",
+        acceptedPrivacy: false
     };
 
     const validationSchema = Yup.object({
         username: Yup.string()
-            .required("Username is required")
-            .min(3, "Username must be at least 3 characters"),
+            .required(t('auth.usernameRequired'))
+            .min(3, t('auth.usernameMin')),
         email: Yup.string()
-            .email("Invalid email address")
-            .required("Email is required"),
+            .email(t('auth.invalidEmail'))
+            .required(t('auth.required')),
         password: Yup.string()
-            .required("Password is required")
-            .min(8, "Password must be at least 8 characters"),
+            .required(t('auth.required'))
+            .min(8, t('auth.passwordMin')),
         confirmationPassword: Yup.string()
-            .required("Please confirm your password")
-            .oneOf([Yup.ref('password')], "Passwords must match")
+            .required(t('auth.confirmPasswordRequired'))
+            .oneOf([Yup.ref('password')], t('auth.passwordsMatch')),
+        acceptedPrivacy: Yup.boolean()
+            .oneOf([true], t('auth.privacyPolicyRequired'))
     });
 
     const handleSubmit = async (values, { setSubmitting, setErrors }) => {
         try {
-            await onConfirmMail(values);
+            await onConfirmMail({ ...values, privacyPolicyVersion });
         } catch (err) {
             setErrors({ submit: err.message });
         } finally {
@@ -97,7 +124,7 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5, delay: 0.2 }}
                 >
-                    Sign Up
+                    {t('auth.signUp')}
                 </motion.h2>
                 {error && (
                     <motion.div
@@ -122,11 +149,11 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ duration: 0.5, delay: 0.3 }}
                             >
-                                <label htmlFor="username">Username</label>
+                                <label htmlFor="username">{t('auth.username')}</label>
                                 <Field
                                     name="username"
                                     type="text"
-                                    placeholder="Enter your username"
+                                    placeholder={t('auth.usernamePlaceholder')}
                                 />
                                 <ErrorMessage name="username" component="div" className="auth-error" />
                             </motion.div>
@@ -136,11 +163,11 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ duration: 0.5, delay: 0.4 }}
                             >
-                                <label htmlFor="email">Email</label>
+                                <label htmlFor="email">{t('auth.email')}</label>
                                 <Field
                                     name="email"
                                     type="email"
-                                    placeholder="Enter your email"
+                                    placeholder={t('auth.emailPlaceholder')}
                                 />
                                 <ErrorMessage name="email" component="div" className="auth-error" />
                             </motion.div>
@@ -150,11 +177,11 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ duration: 0.5, delay: 0.5 }}
                             >
-                                <label htmlFor="password">Password</label>
+                                <label htmlFor="password">{t('auth.password')}</label>
                                 <Field
                                     name="password"
                                     type={showPassword ? "text" : "password"}
-                                    placeholder="Enter your password"
+                                    placeholder={t('auth.passwordPlaceholder')}
                                 />
                                 <button
                                     type="button"
@@ -173,11 +200,11 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                                 transition={{ duration: 0.5, delay: 0.6 }}
                             >
 
-                                <label htmlFor="confirmationPassword">Confirm Password</label>
+                                <label htmlFor="confirmationPassword">{t('auth.confirmPassword')}</label>
                                 <Field
                                     name="confirmationPassword"
                                     type={showConfirmPassword ? "text" : "password"}
-                                    placeholder="Confirm your password"
+                                    placeholder={t('auth.confirmPasswordPlaceholder')}
                                 />
                                 <button
                                     type="button"
@@ -188,6 +215,58 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                                     {showConfirmPassword ? <RiEyeFill /> : <RiEyeCloseLine />}
                                 </button>
                                 <ErrorMessage name="confirmationPassword" component="div" className="auth-error" />
+                            </motion.div>
+                            <motion.div
+                                className="auth-field auth-privacy-checkbox"
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ duration: 0.5, delay: 0.7 }}
+                            >
+                                <div className="privacy-checkbox-wrapper">
+                                    <Field name="acceptedPrivacy">
+                                        {({ field }) => (
+                                            <>
+                                                <div className="custom-checkbox-container">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="acceptedPrivacy"
+                                                        {...field}
+                                                        checked={field.value}
+                                                        className="custom-checkbox-input"
+                                                    />
+                                                    <label htmlFor="acceptedPrivacy" className="custom-checkbox-label">
+                                                        <span className="checkbox-box">
+                                                            {field.value && (
+                                                                <svg viewBox="0 0 16 16" className="checkbox-check">
+                                                                    <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+                                                                </svg>
+                                                            )}
+                                                        </span>
+                                                        <span className="checkbox-text">
+                                                            {t('auth.iAgreeTo')}{' '}
+                                                            <button
+                                                                type="button"
+                                                                className="privacy-link"
+                                                                onClick={() => setShowPrivacyModal(true)}
+                                                            >
+                                                                {t('auth.privacyPolicy')}
+                                                            </button>
+                                                            {' & '}
+                                                            <button
+                                                                type="button"
+                                                                className="privacy-link"
+                                                                onClick={() => setShowPrivacyModal(true)}
+                                                            >
+                                                                {t('auth.termsOfService')}
+                                                            </button>
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                                <ErrorMessage name="acceptedPrivacy" component="div" className="auth-error" />
+                                            </>
+                                        )}
+                                    </Field>
+                                </div>
                             </motion.div>
                             {errors.submit && (
                                 <motion.div
@@ -208,7 +287,7 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                             >
-                                {loading ? 'Loading...' : 'Sign Up'}
+                                {loading ? t('auth.loading') : t('auth.signUp')}
                             </motion.button>
 
                         </Form>
@@ -223,9 +302,14 @@ const SignupForMoney = ({ onLogin, onConfirmMail, loading, error, refCode }) => 
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.5, delay: 0.7 }}
                 >
-                    <span onClick={onLogin}>Already have an account? Login</span>
+                    <span onClick={onLogin}>{t('auth.alreadyHaveAccount')} {t('auth.login')}</span>
                 </motion.div>
             </motion.div>
+
+            <PrivacyTermsModal
+                isOpen={showPrivacyModal}
+                onClose={() => setShowPrivacyModal(false)}
+            />
         </div>
     );
 };

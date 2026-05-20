@@ -6,7 +6,7 @@ import { fileService } from './fileService';
 export const userService = {
     getUserInfo: async (token) => {
         try {
-            const response = await api.get('/user/Getloginuseraccount', {
+            const response = await api.get('/users/profile', {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -149,7 +149,12 @@ export const userService = {
         }
     },
 
-    // Create file in folder
+    /**
+     * Create file in folder
+     * @deprecated Use fileService.uploadFile(file, token, { folderId }) instead.
+     * This method uses legacy direct FormData upload. The new unified system
+     * supports chunked R2 uploads and TUS video uploads with pause/resume.
+     */
     createFileInFolder: async (folderId, file, token) => {
         try {
             const formData = new FormData();
@@ -287,10 +292,14 @@ export const userService = {
     // Request account deletion
     requestAccountDeletion: async (data, token) => {
         try {
+            const headers = {};
+            // Only add Authorization header if token exists
+            if (token) {
+                headers.Authorization = `Bearer ${token}`;
+            }
+
             const response = await api.post('/user/requestAccountDeletion', data, {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
+                headers
             });
             return response.data;
         } catch (error) {

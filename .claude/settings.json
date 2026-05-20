@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/mega_box/lib/core/data/models/responses/files/**)",
+      "Read(//d/mega_box/lib/core/api/**)",
+      "Read(//d/mega_box/**)",
+      "Bash(grep \".dart$\")",
+      "PowerShell(head -50)",
+      "Read(//d/fedk/Feidack partner/**)",
+      "Bash(find \"d:\\\\megaaaback\" -name \"pubspec.yaml\" -o -name \"*.dart\" 2>/dev/null | grep -i megabox | head -10)",
+      "Read(//d/megaaaback/**)",
+      "Bash(grep -rn \"navigate\\(\\\\`/dashboard/\\\\${\" --include=\"*.jsx\" --include=\"*.js\")",
+      "Bash(grep -rn \"<Link.*to={\\\\`\" --include=\"*.jsx\")",
+      "Bash(Get-ChildItem -Path . -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(git -C \"D:\\\\mega_box\" log --oneline -n 15)",
+      "Bash(grep -E '\\\\.\\(ts|js\\)$')"
+    ]
+  }
+}

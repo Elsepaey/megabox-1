@@ -8,6 +8,7 @@ import { useLanguage } from '../../../context/LanguageContext';
 import { useCookies } from 'react-cookie';
 import { useQuery } from 'react-query';
 import { fileService } from '../../../services/api';
+import { getAllUnifiedItems } from '../../../services/itemsService';
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../../helpers/ToastOptions';
 import axios from 'axios';
@@ -25,8 +26,10 @@ export default function UploadFromMegaBox({ ToggleUploadFile, refetch, insideFil
     const GetFiles = async () => {
         if (!Token.MegaBox) return { files: [] };
         try {
-            const data = await fileService.getAllFiles(Token.MegaBox);
-            return data || { files: [] };
+            const items = await getAllUnifiedItems(Token.MegaBox);
+            // Filter to get only files (exclude folders)
+            const files = items.filter(item => !item.isFolder && item.itemType !== 'folder');
+            return { files };
         } catch {
             return { files: [] };
         }
