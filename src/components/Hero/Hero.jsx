@@ -47,46 +47,25 @@ const Hero = () => {
   const handleDownloadClick = async () => {
     setIsLoadingAppLink(true);
     try {
-      // Call the API to get app download links
-      // Note: This endpoint might work without auth token for public access
-      const response = await authService.getAppLink(MegaBox.MegaBox || null);
-      
-      // Handle new response structure with links array
+      const response = await authService.getAppLink();
+      const appLinks = response?.appLinks || {};
+      const userPlatform = detectPlatform();
+
       let appLink = null;
-      
-      if (response?.links && Array.isArray(response.links) && response.links.length > 0) {
-        // Get active links only
-        const activeLinks = response.links.filter(link => link.isActive);
-        
-        if (activeLinks.length > 0) {
-          // Try to find link matching user's platform
-          const userPlatform = detectPlatform();
-          const platformLink = activeLinks.find(link => 
-            link.platform?.toLowerCase() === userPlatform
-          );
-          
-          // Use platform-specific link if found, otherwise use first active link
-          appLink = platformLink?.link || activeLinks[0]?.link;
-        }
+      if (userPlatform === 'ios') {
+        appLink = appLinks.appStore || appLinks.playStore || appLinks.web || null;
       } else {
-        // Fallback to old response structure
-        appLink = response?.appLink || response?.link || response?.url || 
-                 response?.data?.appLink || response?.data?.link || response?.data?.url;
+        appLink = appLinks.playStore || appLinks.appStore || appLinks.web || null;
       }
-      
+
       if (appLink) {
-        // Show success toast with message from response if available
         const successMessage = response?.message || t('hero.downloadSuccess') || 'App link retrieved successfully';
         toast.success(successMessage, ToastOptions("success"));
-        
-        // Open the link in a new window
-        window.open(appLink, '_blank');
+        window.open(appLink, '_blank', 'noopener,noreferrer');
       } else {
         toast.error(t('hero.downloadError') || 'App download link not found', ToastOptions("error"));
       }
-    } catch (error) {
-      // If API call fails (e.g., no auth token), fallback to scrolling to pricing section
-      console.log('App link API call failed, falling back to pricing section:', error);
+    } catch {
       scrollToSection('pricing');
     } finally {
       setIsLoadingAppLink(false);

@@ -4,10 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import { useCookies } from 'react-cookie';
 import { jwtDecode } from 'jwt-decode';
 import Loading from '../components/Loading/Loading';
+import { isStaffRole } from '../utils/roles';
 
-const TESTING_MODE = false;
-const ALLOW_OWNER_ACCESS_IN_TESTING = false;
-
+// requiredRole: "User" or "Staff" (Owner or Admin).
 export default function RoleProtector({ children, requiredRole }) {
     const { getUserRole } = useAuth();
     const [cookies] = useCookies(['MegaBox']);
@@ -15,11 +14,6 @@ export default function RoleProtector({ children, requiredRole }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (TESTING_MODE && ALLOW_OWNER_ACCESS_IN_TESTING && requiredRole === "Owner") {
-            setLoading(false);
-            return;
-        }
-
         const token = cookies.MegaBox;
         if (!token) {
             setLoading(false);
@@ -42,19 +36,16 @@ export default function RoleProtector({ children, requiredRole }) {
         }
     }, [cookies, getUserRole, requiredRole]);
 
-    if (TESTING_MODE && ALLOW_OWNER_ACCESS_IN_TESTING && requiredRole === "Owner") {
-        return children;
-    }
-
     if (loading) {
         return <Loading />
     }
 
-    if (role === requiredRole) {
+    const allowed = requiredRole === 'Staff' ? isStaffRole(role) : role === requiredRole;
+    if (allowed) {
         return children;
     }
 
-    if (role === "Owner") {
+    if (isStaffRole(role)) {
         return <Navigate to="/Owner/profile" replace />;
     }
 

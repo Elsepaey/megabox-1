@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import ReactPlayer from 'react-player';
-import { FiX, FiDownload, FiSettings } from 'react-icons/fi';
+import { FiX, FiSettings } from 'react-icons/fi';
 import { AiOutlineLoading3Quarters } from 'react-icons/ai';
+import { useCookies } from 'react-cookie';
 import { pollVideoStatus } from '../../services/itemsService';
-import { useAuth } from '../../context/AuthContext';
+import { authStorage } from '../../services/authStorage';
 import { useLanguage } from '../../context/LanguageContext';
-
 /**
  * ProcessingOverlay - Shows video processing status
  */
@@ -125,8 +125,9 @@ function VideoPlayer({
     const [processingStatus, setProcessingStatus] = useState(null);
     const [processingPercent, setProcessingPercent] = useState(null);
     const [isReady, setIsReady] = useState(readyToStream);
-    const { token } = useAuth();
-    const { t } = useLanguage();
+    const [resolvedUrl, setResolvedUrl] = useState(null);
+    const [cookies] = useCookies(['MegaBox']);
+    const token = cookies.MegaBox || authStorage.getAccessToken();
 
     // Poll for processing status if not ready
     useEffect(() => {
@@ -134,12 +135,14 @@ function VideoPlayer({
             const stopPolling = pollVideoStatus(token, fileId, (status) => {
                 setProcessingStatus(status?.status || null);
 
-                // Extract processing percentage if available
                 if (status?.status?.progress) {
                     setProcessingPercent(Math.round(status.status.progress));
                 }
 
-                // Check if ready
+                if (status?.playback?.hls) {
+                    setResolvedUrl(status.playback.hls);
+                }
+
                 if (status?.readyToStream || status?.status?.state === 'ready') {
                     setIsReady(true);
                 }
@@ -150,7 +153,6 @@ function VideoPlayer({
             };
         }
     }, [isReady, fileId, token]);
-
     // Initialize quality selector
     useEffect(() => {
         if (downloads && downloads.length > 0 && !selectedQuality) {
@@ -177,7 +179,7 @@ function VideoPlayer({
         );
     }
 
-    const currentVideoUrl = selectedQuality?.url || videoUrl;
+    const currentVideoUrl = selectedQuality?.url || resolvedUrl || videoUrl;
 
     return (
         <div className="fixed inset-0 z-50 bg-black bg-opacity-95 flex items-center justify-center p-4">

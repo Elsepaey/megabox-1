@@ -1,6 +1,8 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import Footer from "../../components/Footer/Footer";
 import { useLanguage } from "../../context/LanguageContext";
+import { useAuth } from "../../context/AuthContext";
 import { userService } from "../../services/userService";
 import { useCookies } from "react-cookie";
 import { toast } from "react-toastify";
@@ -9,34 +11,39 @@ import './AccountDeletion.scss';
 
 const AccountDeletion = () => {
     const { t, language } = useLanguage();
+    const { logout } = useAuth();
     const [cookies] = useCookies(['MegaBox']);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [requestSubmitted, setRequestSubmitted] = useState(false);
-    const [email, setEmail] = useState('');
-    const [reason, setReason] = useState('');
+    const [confirmed, setConfirmed] = useState(false);
+
+    const isAuthenticated = Boolean(cookies.MegaBox);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
 
-        if (!email) {
-            toast.error(t('accountDeletion.errorEmailRequired'), ToastOptions("error"));
+        if (!isAuthenticated) {
+            toast.error(t('filesV2.accountCloseLoginRequired') || 'Please log in to close your account.', ToastOptions("error"));
+            return;
+        }
+
+        if (!confirmed) {
+            toast.error(t('filesV2.accountCloseConfirmRequired') || 'Please confirm that you want to close your account.', ToastOptions("error"));
             return;
         }
 
         setIsSubmitting(true);
         try {
-            // Token is optional - only send if user is logged in
-            const token = cookies.MegaBox || null;
-            await userService.requestAccountDeletion({ email, reason }, token);
+            await userService.requestAccountDeletion({}, cookies.MegaBox);
             toast.success(t('accountDeletion.successMessage'), ToastOptions("success"));
+            await logout();
             setRequestSubmitted(true);
         } catch (error) {
-            toast.error(error.message || t('accountDeletion.errorMessage'), ToastOptions("error"));
+            toast.error(error?.message || t('accountDeletion.errorMessage'), ToastOptions("error"));
         } finally {
             setIsSubmitting(false);
         }
     };
-
     return (
         <>
             <main className="AccountDeletion" dir={language === 'ar' ? 'rtl' : 'ltr'}>
@@ -94,42 +101,45 @@ const AccountDeletion = () => {
 
                                 <div className="form-section">
                                     <h2>{t('accountDeletion.formTitle')}</h2>
-                                    <p className="form-description">{t('accountDeletion.formDesc')}</p>
+                                    <p className="form-description">
+                                        {t('filesV2.accountCloseWarning') || 'Submitting this form immediately closes your currently signed-in MegaBox account and signs you out.'}
+                                    </p>
 
-                                    <form onSubmit={handleSubmit} className="deletion-form">
-                                        <div className="form-group">
-                                            <label htmlFor="email">{t('accountDeletion.emailLabel')}</label>
-                                            <input
-                                                type="email"
-                                                id="email"
-                                                value={email}
-                                                onChange={(e) => setEmail(e.target.value)}
-                                                placeholder={t('accountDeletion.emailPlaceholder')}
-                                                required
-                                            />
+                                    {!isAuthenticated ? (
+                                        <div className="login-required-box">
+                                            <p>
+                                                {t('filesV2.accountCloseLoginRequired') || 'You must be signed in to close your account.'}
+                                            </p>
+                                            <Link to="/login" className="submit-btn" style={{ display: 'inline-block', textAlign: 'center', textDecoration: 'none', marginTop: '12px' }}>
+                                                {t('common.login') || 'Log in'}
+                                            </Link>
                                         </div>
+                                    ) : (
+                                        <form onSubmit={handleSubmit} className="deletion-form">
+                                            <div className="form-group">
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={confirmed}
+                                                        onChange={(e) => setConfirmed(e.target.checked)}
+                                                        required
+                                                    />
+                                                    <span>
+                                                        {t('filesV2.accountCloseConfirmLabel') || 'I understand this will close my signed-in account immediately.'}
+                                                    </span>
+                                                </label>
+                                            </div>
 
-                                        <div className="form-group">
-                                            <label htmlFor="reason">{t('accountDeletion.reasonLabel')}</label>
-                                            <textarea
-                                                id="reason"
-                                                value={reason}
-                                                onChange={(e) => setReason(e.target.value)}
-                                                placeholder={t('accountDeletion.reasonPlaceholder')}
-                                                rows="5"
-                                            />
-                                        </div>
-
-                                        <button
-                                            type="submit"
-                                            className="submit-btn"
-                                            disabled={isSubmitting}
-                                        >
-                                            {isSubmitting ? t('accountDeletion.submitting') : t('accountDeletion.submitButton')}
-                                        </button>
-                                    </form>
+                                            <button
+                                                type="submit"
+                                                className="submit-btn"
+                                                disabled={isSubmitting || !confirmed}
+                                            >
+                                                {isSubmitting ? t('accountDeletion.submitting') : t('accountDeletion.submitButton')}
+                                            </button>
+                                        </form>
+                                    )}
                                 </div>
-
                                 <div className="contact-section">
                                     <h2>{t('accountDeletion.contactTitle')}</h2>
                                     <p>

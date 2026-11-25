@@ -6,8 +6,8 @@ import { useCookies } from 'react-cookie';
 import { useLanguage } from '../../context/LanguageContext';
 import { usePageSEO } from '../../hooks/usePageSEO';
 import PartnerCTA from '../../components/PartnerCta/PartnerCta';
-import api from '../../services/api';
-import { FaShareAlt, FaUsers, FaDollarSign, FaChartLine, FaDownload, FaEye, FaUserPlus, FaCheckCircle, FaCloud, FaServer, FaCode, FaShieldAlt, FaLink, FaBullhorn, FaWallet } from 'react-icons/fa';
+import { api } from '../../services/apiConfig';
+import { FaUsers, FaChartLine, FaDownload, FaEye, FaUserPlus, FaCheckCircle, FaCloud, FaServer, FaCode, FaShieldAlt, FaLink, FaBullhorn, FaWallet } from 'react-icons/fa';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Autoplay, FreeMode } from 'swiper/modules';
 import 'swiper/css';
@@ -78,12 +78,8 @@ export default function PromotersPage() {
     // Fetch user data if logged in
     const fetchUserData = async () => {
         try {
-            const response = await api.get('/users/profile', {
-                headers: {
-                    Authorization: `Bearer ${cookies.MegaBox}`
-                }
-            });
-            setUserData(response.data.data);
+            const response = await api.get('/users/profile');
+            setUserData(response.data?.data || null);
         } catch (error) {
             console.error('Error fetching user data:', error);
         }
@@ -92,8 +88,9 @@ export default function PromotersPage() {
     useEffect(() => {
         if (cookies.MegaBox) {
             fetchUserData();
+        } else {
+            setUserData(null);
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [cookies.MegaBox]);
 
     // Reinitialize Swiper when language changes
@@ -105,13 +102,8 @@ export default function PromotersPage() {
         }
     }, [language]);
 
-
-    // Check if user is subscribed to any plan
-    const isSubscribed = userData && (userData?.watchingplan || userData?.Downloadsplan);
-    
-    // Check if user is a promoter
-    const isPromoter = userData && userData?.isPromoter === 'true';
-
+    const isPromoter = userData?.isPromoter === true;
+    const isSubscribed = isPromoter && Boolean(userData?.promoterPlan);
     // Structured Data for SEO
     const structuredData = {
         "@context": "https://schema.org",
@@ -542,12 +534,12 @@ export default function PromotersPage() {
                                 {t('promotersPage.cta.title')}
                             </h2>
                             <p className="promoters-cta__description">
-                                {isSubscribed 
-                                    ? (userData?.watchingplan && userData?.Downloadsplan 
-                                        ? t('partners.subscribedBothPlans') || 'أنت مشترك في كلا الخطتين'
-                                        : userData?.watchingplan 
-                                            ? t('partners.subscribedViewsPlan') || 'أنت مشترك في خطة المشاهدات'
-                                            : t('partners.subscribedDownloadsPlan') || 'أنت مشترك في خطة التحميلات'
+                                {isSubscribed
+                                    ? (userData?.promoterPlan === 'views'
+                                        ? t('partners.subscribedViewsPlan') || t('payouts.planViews')
+                                        : userData?.promoterPlan === 'installs'
+                                            ? t('partners.subscribedDownloadsPlan') || t('payouts.planInstalls')
+                                            : t('partners.alreadySubscribed')
                                     )
                                     : t('promotersPage.cta.description')
                                 }
@@ -585,7 +577,7 @@ export default function PromotersPage() {
                             >
                                 ×
                             </button>
-                            <PartnerCTA isModal={true} onClose={() => setShowPlansModal(false)} />
+                            <PartnerCTA isModal={true} onClose={() => setShowPlansModal(false)} onEnrolled={fetchUserData} />
                         </div>
                     </div>
                 )}

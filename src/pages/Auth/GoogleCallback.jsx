@@ -1,23 +1,39 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { useCookies } from 'react-cookie';
+import { jwtDecode } from 'jwt-decode';
 import { ToastOptions } from '../../helpers/ToastOptions';
-import { API_URL, notificationService, authService } from '../../services/api';
-import { getFCMToken } from '../../utils/fcmToken';
+import { authService } from '../../services/api';
+import { privacyTermsService } from '../../services/privacyTermsService';
+import { useAuth } from '../../context/AuthContext';
 import Loading from '../../components/Loading/Loading';
+
+function resolveRedirectPath(data) {
+    let role = data?.user?.role;
+    if (!role && data?.accessToken) {
+        try {
+            role = jwtDecode(data.accessToken)?.role;
+        } catch {
+            role = null;
+        }
+    }
+    if (role === 'Owner' || role === 'Admin') {
+        return '/Owner/profile';
+    }
+    return '/dashboard';
+}
 
 const GoogleCallback = () => {
     const navigate = useNavigate();
-    const [, setCookie] = useCookies(['MegaBox']);
     const [searchParams] = useSearchParams();
-    const [isProcessing, setIsProcessing] = useState(false);
+    const { persistAuthSuccess } = useAuth();
+    const hasProcessedRef = useRef(false);
 
     useEffect(() => {
-        const handleOAuthCallback = async () => {
-            if (isProcessing) return;
-            setIsProcessing(true);
+        if (hasProcessedRef.current) return;
+        hasProcessedRef.current = true;
 
+        const handleOAuthCallback = async () => {
             let accessToken = searchParams.get('access_token');
             let error = searchParams.get('error');
 
@@ -34,61 +50,63 @@ const GoogleCallback = () => {
                 error = urlParams.get('error') || urlHash.get('error');
             }
 
+            // Clean up OAuth token/error from URL before redirecting
+            window.history.replaceState({}, document.title, '/auth/callback');
+
             if (accessToken) {
                 try {
-                    const data = await authService.loginWithGmail(accessToken);
-
-                    if (data?.message === "Done" || data?.data?.access_Token) {
-                        // Use 'Lax' instead of 'Strict' for better mobile compatibility
-                        setCookie('MegaBox', data?.data?.access_Token, {
-                            path: '/',
-                            secure: window.location.protocol === 'https:',
-                            sameSite: 'Lax',
-                            maxAge: 7 * 24 * 60 * 60,
-                        });
-
-                        // Save FCM token for push notifications (if available)
-                        try {
-                            const fcmToken = await getFCMToken();
-                            if (fcmToken && data?.data?.checkUser?._id) {
-                                await notificationService.saveFcmToken(
-                                    data.data.checkUser._id,
-                                    fcmToken
-                                );
-                            }
-                        } catch {
-                            // Silently fail - FCM token is optional
+                    let privacyPolicyVersion = null;
+                    try {
+                        const policyRes = await privacyTermsService.getPrivacyPolicy();
+                        if (
+                            policyRes?.policy?.version !== undefined &&
+                            policyRes?.policy?.version !== null
+                        ) {
+                            privacyPolicyVersion = Number(policyRes.policy.version);
                         }
+                    } catch {
+                        // Proceed without version if no active policy exists
+                    }
 
-                        toast.success("Successfully logged in with Google!", ToastOptions("success"));
+                    const data = await authService.loginWithGmail(
+                        accessToken,
+                        privacyPolicyVersion,
+                    );
 
-                        // Small delay to ensure cookie is set
-                        setTimeout(() => {
-                            navigate('/dashboard');
-                        }, 100);
+                    if (data?.accessToken) {
+                        await persistAuthSuccess(data);
+                        toast.success(
+                            data?.message || 'Successfully logged in with Google!',
+                            ToastOptions('success'),
+                        );
+                        navigate(resolveRedirectPath(data), { replace: true });
                     } else {
-                        toast.error(data?.message || "Failed to login with Google. Please try again.", ToastOptions("error"));
-                    navigate('/login');
+                        toast.error(
+                            data?.message || 'Failed to login with Google. Please try again.',
+                            ToastOptions('error'),
+                        );
+                        navigate('/login', { replace: true });
+                    }
+                } catch (err) {
+                    toast.error(
+                        err?.message || 'An error occurred during Google login. Please try again.',
+                        ToastOptions('error'),
+                    );
+                    navigate('/login', { replace: true });
                 }
-            } catch (err) {
-                toast.error(err?.message || "An error occurred during Google login. Please try again.", ToastOptions("error"));
-                navigate('/login');
-            } finally {
-                setIsProcessing(false);
-            }
-        } else if (error) {
-            if (error === 'redirect_uri_mismatch') {
-                toast.error("OAuth configuration error. Please check Google Cloud Console settings. Make sure the redirect URI is configured correctly.", ToastOptions("error"));
+            } else if (error) {
+                if (error === 'redirect_uri_mismatch') {
+                    toast.error(
+                        'OAuth configuration error. Please check Google Cloud Console settings. Make sure the redirect URI is configured correctly.',
+                        ToastOptions('error'),
+                    );
+                } else {
+                    toast.error('Google Login Failed: ' + error, ToastOptions('error'));
+                }
+                navigate('/login', { replace: true });
             } else {
-                toast.error("Google Login Failed: " + error, ToastOptions("error"));
+                navigate('/login', { replace: true });
             }
-            navigate('/login');
-        } else {
-            navigate('/login');
-        }
-
-            // Clean up URL - remove both query params and hash
-            window.history.replaceState({}, document.title, '/auth/callback');
         };
 
         handleOAuthCallback();
@@ -96,11 +114,17 @@ const GoogleCallback = () => {
     }, []);
 
     return (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <div
+            style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                minHeight: '100vh',
+            }}
+        >
             <Loading />
         </div>
     );
 };
 
 export default GoogleCallback;
-

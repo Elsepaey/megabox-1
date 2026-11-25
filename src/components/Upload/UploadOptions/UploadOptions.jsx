@@ -35,6 +35,11 @@ export default function UploadOptions({ onClose, onSelectDesktop, onSelectMegaBo
     };
 
     const handleMegaBoxClick = async () => {
+        if (onSelectMegaBox) {
+            onSelectMegaBox();
+            onClose();
+            return;
+        }
         if (isPromoter) {
             // For promoters, get app link and redirect to download
             setIsLoadingAppLink(true);
@@ -81,8 +86,6 @@ export default function UploadOptions({ onClose, onSelectDesktop, onSelectMegaBo
                 setIsLoadingAppLink(false);
             }
         } else {
-            // For regular users, open upload from MegaBox modal
-            onSelectMegaBox();
             onClose();
         }
     };
@@ -131,7 +134,7 @@ export default function UploadOptions({ onClose, onSelectDesktop, onSelectMegaBo
                         </div>
                     </button>
 
-                    {isPromoter && (
+                    {(onSelectMegaBox || isPromoter) && (
                         <button
                             className="UploadOptions_option"
                             onClick={handleMegaBoxClick}
@@ -141,11 +144,17 @@ export default function UploadOptions({ onClose, onSelectDesktop, onSelectMegaBo
                                 <HiCloud />
                             </div>
                             <div className="UploadOptions_option_content">
-                                <h3 className="UploadOptions_option_title">{t("uploadOptions.fromMegaBox")}</h3>
+                                <h3 className="UploadOptions_option_title">
+                                    {onSelectMegaBox
+                                        ? (t("filesV2.copyFromMegaBoxTitle") || t("uploadOptions.fromMegaBox") || "Copy from MegaBox")
+                                        : t("uploadOptions.fromMegaBox")}
+                                </h3>
                                 <p className="UploadOptions_option_desc">
-                                    {isLoadingAppLink 
-                                        ? (t("uploadOptions.loadingAppLink") || "Loading...")
-                                        : (t("uploadOptions.fromMegaBoxDesc") || "Download MegaBox app to upload files")
+                                    {onSelectMegaBox
+                                        ? (t("filesV2.copyFromMegaBoxDesc") || "Copy existing files from your MegaBox drive")
+                                        : isLoadingAppLink
+                                            ? (t("uploadOptions.loadingAppLink") || "Loading...")
+                                            : (t("uploadOptions.fromMegaBoxDesc") || "Download MegaBox app to upload files")
                                     }
                                 </p>
                             </div>

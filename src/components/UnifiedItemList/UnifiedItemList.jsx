@@ -30,8 +30,10 @@ function UnifiedItemList({
     onDelete,
     onRename,
     onShare,
+    onDisableShare,
     onArchive,
     onOpenItem,
+    refetch,
 }) {
     const { t } = useLanguage();
 
@@ -85,13 +87,15 @@ function UnifiedItemList({
                             key={`folder-${itemId}-${index}`}
                             name={item.name || item.fileName}
                             data={item}
-                            onRename={(name, close, id) => onRename?.(name, close, id, true)}
-                            onDelete={() => onDelete?.(item)}
-                            onShare={() => onShare?.(itemId, true)}
-                            onArchive={() => onArchive?.(item)}
+                            onRename={onRename ? (name, close, id) => onRename(name, close, id, true) : undefined}
+                            onDelete={onDelete ? () => onDelete(item) : undefined}
+                            onShare={onShare ? () => onShare(itemId, true) : undefined}
+                            onDisableShare={onDisableShare ? () => onDisableShare('folder', itemId) : undefined}
+                            onArchive={onArchive ? () => onArchive(item) : undefined}
                             isSelectionMode={isSelectionMode}
                             isSelected={selectedItems.folders?.includes(itemId)}
                             onToggleSelect={onToggleSelect}
+                            refetch={refetch}
                         />
                     );
                 } else {
@@ -119,11 +123,13 @@ function UnifiedItemList({
                             isSelectionMode={isSelectionMode}
                             isSelected={selectedItems.files?.includes(itemId)}
                             onToggleSelect={onToggleSelect}
-                            onDelete={() => onDelete?.(item)}
-                            onRename={(name, close, id) => onRename?.(name, close, id, false)}
-                            onShare={() => onShare?.(itemId, false)}
-                            onArchive={() => onArchive?.(item)}
-                            onOpen={() => onOpenItem?.(item)}
+                            onDelete={onDelete ? () => onDelete(item) : undefined}
+                            onRename={onRename ? (name, close, id) => onRename(name, close, id, false) : undefined}
+                            onShare={onShare ? () => onShare(itemId, false) : undefined}
+                            onDisableShare={onDisableShare ? () => onDisableShare('file', itemId) : undefined}
+                            onArchive={onArchive ? () => onArchive(item) : undefined}
+                            onOpen={onOpenItem ? (resolved) => onOpenItem(resolved || item) : undefined}
+                            refetch={refetch}
                         />
                     );
                 }

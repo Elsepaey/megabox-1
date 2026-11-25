@@ -1,290 +1,267 @@
 import React, { useState, useMemo } from 'react';
 import './Earning.scss';
-import { useQuery } from 'react-query';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useCookies } from 'react-cookie';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
 import { FaDollarSign, FaTimes } from 'react-icons/fa';
 import { HiArrowRight, HiArrowLeft, HiChevronDown } from 'react-icons/hi2';
-import { promoterService, paymentService } from '../../services/api';
-import { useLanguage } from '../../context/LanguageContext';
-import { withdrawalService } from '../../services/withdrawalService';
-import { useMutation, useQueryClient } from 'react-query';
 import { toast } from 'react-toastify';
+import { promoterService, paymentService, withdrawalService } from '../../services/api';
+import { useLanguage } from '../../context/LanguageContext';
 import { ToastOptions } from '../../helpers/ToastOptions';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_ALLOWED_REGEX = /^\+?[0-9\s\-()]{6,20}$/;
+
 const cardVariants = {
-    hidden: {
-        opacity: 0,
-        y: 40,
-        scale: 0.95
-    },
+    hidden: { opacity: 0, y: 40, scale: 0.95 },
     visible: {
         opacity: 1,
         y: 0,
         scale: 1,
         transition: {
-            type: "spring",
+            type: 'spring',
             stiffness: 80,
             damping: 20,
             mass: 1,
-            ease: [0.25, 0.46, 0.45, 0.94]
-        }
-    }
+            ease: [0.25, 0.46, 0.45, 0.94],
+        },
+    },
 };
+
+function getApiError(error, fallback) {
+    const msg = error?.response?.data?.message;
+    if (Array.isArray(msg)) return msg.join('\n');
+    return msg || error?.message || fallback;
+}
+
+function getMethodDisplayName(method, language) {
+    if (!method) return '';
+    return (language === 'ar' ? method.name_ar : method.name_en) || method.name || method.name_en || '';
+}
+
+function getFieldLabel(field, language) {
+    return (language === 'ar' ? field.label_ar : field.label_en) || field.label || field.key;
+}
+
+function formatWithdrawalMethod(withdrawal, language) {
+    const info = withdrawal?.paymentMethodInfo;
+    if (info && typeof info === 'object') {
+        return (language === 'ar' ? info.name_ar : info.name_en) || info.name_en || withdrawal?.paymentMethod || '-';
+    }
+    return withdrawal?.paymentMethod || '-';
+}
+
+function formatWithdrawalDetails(withdrawal, language) {
+    const map = withdrawal?.paymentDetailsMap;
+    if (map && typeof map === 'object' && !Array.isArray(map)) {
+        const labels = new Map(
+            (withdrawal?.paymentMethodInfo?.fields || []).map((f) => [
+                f.key,
+                (language === 'ar' ? f.label_ar : f.label_en) || f.key,
+            ]),
+        );
+        const parts = Object.entries(map)
+            .filter(([, v]) => v !== undefined && v !== null && v !== '')
+            .map(([k, v]) => `${labels.get(k) || k}: ${v}`);
+        if (parts.length > 0) return parts.join(' · ');
+    }
+    return withdrawal?.paymentDetails || '-';
+}
 
 export default function Earning() {
     const [cookies] = useCookies(['MegaBox']);
     const token = cookies.MegaBox;
     const { t, language } = useLanguage();
-
-    // Fetch earnings data
-    const { data: earningsData, isLoading: earningsLoading } = useQuery(
-        ['userEarnings'],
-        () => promoterService.getUserEarnings(token),
-        {
-            enabled: !!token,
-            retry: 2
-        }
-    );
-
-    const currency = earningsData?.currency || 'USD';
-    const amount = earningsData?.confirmedRewards || earningsData?.actualIncome || '0.000000';
-    const review = earningsData?.pendingRewards || earningsData?.estimatedIncome || '0.000000';
-    const totalEarnings = earningsData?.totalEarnings || earningsData?.promoterEarnings || '0.000000';
-    const withdrawable = earningsData?.withdrawable || totalEarnings || '0.000000';
-    const withdrawableAmount = parseFloat(withdrawable) || 0;
+    const queryClient = useQueryClient();
 
     const [withdrawalAmount, setWithdrawalAmount] = useState('');
-    const [paymentMethod, setPaymentMethod] = useState('');
-    const [whatsappTelegram, setWhatsappTelegram] = useState('');
+    const [selectedMethodId, setSelectedMethodId] = useState('');
+    const [fieldValues, setFieldValues] = useState({});
     const [errors, setErrors] = useState({});
     const [touched, setTouched] = useState({});
     const [showRecordModal, setShowRecordModal] = useState(false);
     const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
-    const [viewMode, setViewMode] = useState('all'); // 'all', 'approved', 'pending', 'rejected'
-    const [selectedPaymentServiceId, setSelectedPaymentServiceId] = useState(null);
-    const queryClient = useQueryClient();
+    const [viewMode, setViewMode] = useState('all');
+    const [historyPage, setHistoryPage] = useState(1);
 
-    // Fetch payment services
-    const { data: paymentServicesData } = useQuery(
-        ['paymentServices'],
-        () => paymentService.getPaymentServices(token),
-        {
-            enabled: !!token,
-            retry: 2,
-            onError: (error) => {
-                // Silently handle errors - payment services are optional
-                console.error('Error fetching payment services:', error);
-            }
-        }
+    // GET /api/earnings
+    const { data: earningsResponse, isLoading: earningsLoading } = useQuery(
+        ['userEarnings'],
+        () => promoterService.getEarnings(),
+        { enabled: !!token, retry: 1 },
     );
 
-    const paymentServices = paymentServicesData?.paymentServices || paymentServicesData?.data || paymentServicesData || [];
-    const activePaymentServices = paymentServices.filter(service => service.isActive !== false);
+    const earnings = earningsResponse?.earnings || {};
+    const currency = 'USD';
+    const confirmedRewards = Number(earnings.confirmedRewards ?? 0);
+    const pendingRewards = Number(earnings.pendingRewards ?? 0);
+    const totalEarnings = Number(earnings.totalEarnings ?? 0);
+    const availableBalance = Number(earnings.availableBalance ?? 0);
 
-
-    // Fetch withdrawal history using getUserWithdrawals API
-    const { data: withdrawalHistory, isLoading: withdrawalHistoryLoading } = useQuery(
-        ['userWithdrawals'],
-        async () => {
-            return promoterService.getUserWithdrawals(token);
-        },
-        {
-            enabled: !!token && showRecordModal,
-            retry: false
-        }
+    // GET /api/payment-methods
+    const { data: paymentMethods = [] } = useQuery(
+        ['paymentMethods', language],
+        () => paymentService.getPaymentMethods(language),
+        { enabled: !!token, retry: 1 },
     );
 
-    // Filter withdrawals client-side based on view mode
-    const displayWithdrawals = useMemo(() => {
-        const allWithdrawals = withdrawalHistory?.withdrawals || withdrawalHistory?.data || withdrawalHistory || [];
-        
-        if (viewMode === 'approved') {
-            // Filter to show only approved withdrawals
-            return allWithdrawals.filter(w => {
-                const status = (w.status || '').toLowerCase();
-                return status === 'approved' || status === 'active';
-            });
-        } else if (viewMode === 'pending') {
-            // Filter to show only pending withdrawals
-            return allWithdrawals.filter(w => {
-                const status = (w.status || '').toLowerCase();
-                return status === 'pending';
-            });
-        } else if (viewMode === 'rejected') {
-            // Filter to show only rejected withdrawals
-            return allWithdrawals.filter(w => {
-                const status = (w.status || '').toLowerCase();
-                return status === 'rejected';
-            });
-        }
-        
-        // 'all' mode - show all withdrawals
-        return allWithdrawals;
-    }, [withdrawalHistory, viewMode]);
+    const selectedMethod = useMemo(
+        () => paymentMethods.find((m) => m._id === selectedMethodId) || null,
+        [paymentMethods, selectedMethodId],
+    );
 
-    const isLoadingWithdrawals = withdrawalHistoryLoading;
+    // GET /api/earnings/withdrawals
+    const statusFilter = viewMode === 'all' ? undefined : viewMode;
+    const { data: withdrawalHistoryData, isLoading: isLoadingWithdrawals } = useQuery(
+        ['userWithdrawals', historyPage, viewMode],
+        () =>
+            withdrawalService.getWithdrawalHistory({
+                page: historyPage,
+                limit: 20,
+                status: statusFilter,
+            }),
+        { enabled: !!token && showRecordModal, retry: false, keepPreviousData: true },
+    );
 
-    // Request withdrawal mutation
+    const historyMeta = withdrawalHistoryData?.meta || null;
+    const displayWithdrawals = Array.isArray(withdrawalHistoryData?.data)
+        ? withdrawalHistoryData.data
+        : [];
+    // POST /api/earnings/withdrawals
     const requestWithdrawalMutation = useMutation(
-        (formData) => {
-            // If a payment service is selected, include its details
-            if (formData.paymentServiceId) {
-                const service = activePaymentServices.find(s => (s._id || s.id) === formData.paymentServiceId);
-                if (!service) {
-                    // Payment service was selected but not found - this is an error
-                    // This can happen if payment services were refetched/filtered after selection
-                    throw new Error(t('withdrawSection.paymentServiceNotFound') || 'Selected payment service is no longer available. Please select a different payment method.');
-                }
-                // Include payment service details in the request
-                return withdrawalService.requestWithdrawal(
-                    formData.amount,
-                    formData.paymentMethod,
-                    formData.whatsappNumber,
-                    formData.details,
-                    token,
-                    {
-                        paymentServiceId: formData.paymentServiceId,
-                        paymentService: service
-                    }
-                );
-            }
-            // Standard withdrawal without payment service
-            return withdrawalService.requestWithdrawal(
-                formData.amount,
-                formData.paymentMethod,
-                formData.whatsappNumber,
-                formData.details,
-                token
-            );
-        },
+        (payload) => withdrawalService.requestWithdrawal(payload),
         {
-            onSuccess: () => {
-                queryClient.invalidateQueries('userWithdrawals');
-                queryClient.invalidateQueries('withdrawalHistory');
-                queryClient.invalidateQueries('userEarnings');
+            onSuccess: (res) => {
+                queryClient.invalidateQueries(['userWithdrawals']);
+                queryClient.invalidateQueries(['userEarnings']);
+                queryClient.invalidateQueries(['promoterStats']);
                 setWithdrawalAmount('');
-                setPaymentMethod('');
-                setSelectedPaymentServiceId(null);
-                setWhatsappTelegram('');
+                setSelectedMethodId('');
+                setFieldValues({});
                 setErrors({});
                 setTouched({});
-                toast.success(t('withdrawSection.withdrawalRequested') || 'Withdrawal request submitted successfully!', ToastOptions("success"));
+                toast.success(
+                    res?.message || t('withdrawSection.withdrawalRequested') || 'Withdrawal request submitted successfully!',
+                    ToastOptions('success'),
+                );
             },
             onError: (error) => {
-                toast.error(error?.response?.data?.message || t('withdrawSection.withdrawalError') || 'Failed to request withdrawal', ToastOptions("error"));
-            }
-        }
-    );
-
-    // Quick withdraw earnings mutation (deprecated endpoint)
-    const withdrawEarningsMutation = useMutation(
-        () => withdrawalService.withdrawEarnings(token),
-        {
-            onSuccess: () => {
-                queryClient.invalidateQueries('userWithdrawals');
-                queryClient.invalidateQueries('withdrawalHistory');
-                queryClient.invalidateQueries('userEarnings');
-                toast.success(t('withdrawSection.earningsWithdrawn') || 'Earnings withdrawn successfully!', ToastOptions("success"));
+                toast.error(
+                    getApiError(error, t('withdrawSection.withdrawalError') || 'Failed to request withdrawal'),
+                    ToastOptions('error'),
+                );
             },
-            onError: (error) => {
-                toast.error(error?.response?.data?.message || t('withdrawSection.withdrawalError') || 'Failed to withdraw earnings', ToastOptions("error"));
-            }
-        }
+        },
     );
 
-    // Validation functions
-    const validateWithdrawalAmount = (value) => {
-        if (!value || value.trim() === '') {
+    const validateAmount = (value) => {
+        if (!value || !String(value).trim()) {
             return t('withdrawSection.amountRequired') || 'Withdrawal amount is required';
         }
-        const numValue = parseFloat(value);
-        if (isNaN(numValue) || numValue <= 0) {
+        const num = Number(value);
+        if (Number.isNaN(num) || num <= 0) {
             return t('withdrawSection.amountInvalid') || 'Please enter a valid amount';
         }
-        if (numValue < 10) {
-            return t('withdrawSection.amountMinimum') || 'Minimum withdrawal amount is 10 USD';
+        if (num < 1) {
+            return t('payouts.amountMinimumOne') || 'Minimum withdrawal amount is 1 USD';
         }
-        if (withdrawableAmount > 0 && numValue > withdrawableAmount) {
-            return t('withdrawSection.amountExceeds') || 'Amount exceeds available balance';
-        }
-        return '';
-    };
-
-    const validatePaymentMethod = () => {
-        // Payment method is valid if a payment service is selected
-        if (!selectedPaymentServiceId) {
-            return t('withdrawSection.paymentMethodRequired') || 'Payment method is required';
+        if (num > availableBalance) {
+            return t('payouts.amountExceeds') || 'Amount exceeds available balance';
         }
         return '';
     };
 
-    const validateWhatsappTelegram = (value) => {
-        if (!value || value.trim() === '') {
-            return t('withdrawSection.accountRequired') || 'WhatsApp/Telegram account is required';
+    const validateDynamicField = (field, rawVal) => {
+        const label = getFieldLabel(field, language);
+        const value = (rawVal || '').trim();
+        if (!value) {
+            if (field.required) {
+                return t('payouts.fieldRequired', { field: label }) || `${label} is required`;
+            }
+            return '';
         }
-        if (value.trim().length < 3) {
-            return t('withdrawSection.accountInvalid') || 'Please enter a valid account';
+        if (field.type === 'email' && !EMAIL_REGEX.test(value)) {
+            return t('payouts.fieldInvalidEmail', { field: label }) || `${label} must be a valid email address`;
+        }
+        if (field.type === 'phone') {
+            const digits = value.replace(/\D/g, '').length;
+            if (!PHONE_ALLOWED_REGEX.test(value) || digits < 6) {
+                return t('payouts.fieldInvalidPhone', { field: label }) || `${label} must be a valid phone number`;
+            }
+        }
+        if (field.pattern) {
+            try {
+                if (!new RegExp(field.pattern).test(value)) {
+                    return t('payouts.fieldInvalidFormat', { field: label }) || `${label} is invalid`;
+                }
+            } catch {
+                // Backend will validate pattern if malformed
+            }
         }
         return '';
     };
 
-    const handleBlur = (field) => {
-        setTouched(prev => ({ ...prev, [field]: true }));
-        validateField(field);
+    const handleSelectMethod = (method) => {
+        setSelectedMethodId(method._id);
+        setFieldValues({});
+        setShowPaymentDropdown(false);
+        setErrors((prev) => ({ withdrawalAmount: prev.withdrawalAmount || '', paymentMethod: '' }));
+        setTouched((prev) => ({ withdrawalAmount: prev.withdrawalAmount || false, paymentMethod: true }));
     };
 
-    const validateField = (field) => {
-        let error = '';
-        switch (field) {
-            case 'withdrawalAmount':
-                error = validateWithdrawalAmount(withdrawalAmount);
-                break;
-            case 'paymentMethod':
-                error = validatePaymentMethod(paymentMethod);
-                break;
-            case 'whatsappTelegram':
-                error = validateWhatsappTelegram(whatsappTelegram);
-                break;
-            default:
-                break;
+    const handleFieldChange = (field, value) => {
+        setFieldValues((prev) => ({ ...prev, [field.key]: value }));
+        const fieldErrKey = `field:${field.key}`;
+        if (touched[fieldErrKey]) {
+            setErrors((prev) => ({ ...prev, [fieldErrKey]: validateDynamicField(field, value) }));
         }
-        setErrors(prev => ({ ...prev, [field]: error }));
-        return error === '';
+    };
+
+    const handleFieldBlur = (field) => {
+        const fieldErrKey = `field:${field.key}`;
+        setTouched((prev) => ({ ...prev, [fieldErrKey]: true }));
+        setErrors((prev) => ({ ...prev, [fieldErrKey]: validateDynamicField(field, fieldValues[field.key]) }));
     };
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        
-        // Mark all fields as touched
-        setTouched({
-            withdrawalAmount: true,
-            paymentMethod: true,
-            whatsappTelegram: true
-        });
 
-        // Validate all fields
-        const isAmountValid = validateField('withdrawalAmount');
-        const isPaymentValid = validateField('paymentMethod');
-        const isAccountValid = validateField('whatsappTelegram');
+        const nextErrors = {};
+        const nextTouched = { withdrawalAmount: true, paymentMethod: true };
 
-        if (isAmountValid && isPaymentValid && isAccountValid) {
-            // Form is valid, proceed with submission
-            const details = {
-                accountName: whatsappTelegram,
-                username: whatsappTelegram,
-                whatsappNumber: whatsappTelegram
-            };
-            
-            requestWithdrawalMutation.mutate({
-                amount: parseFloat(withdrawalAmount),
-                paymentMethod: paymentMethod,
-                whatsappNumber: whatsappTelegram,
-                details: details,
-                paymentServiceId: selectedPaymentServiceId
+        nextErrors.withdrawalAmount = validateAmount(withdrawalAmount);
+        if (!selectedMethod) {
+            nextErrors.paymentMethod = t('withdrawSection.paymentMethodRequired') || 'Payment method is required';
+        }
+
+        const paymentDetails = {};
+        if (selectedMethod) {
+            (selectedMethod.fields || []).forEach((field) => {
+                const fieldErrKey = `field:${field.key}`;
+                nextTouched[fieldErrKey] = true;
+                const val = fieldValues[field.key] || '';
+                const err = validateDynamicField(field, val);
+                if (err) {
+                    nextErrors[fieldErrKey] = err;
+                } else if (val.trim()) {
+                    paymentDetails[field.key] = val.trim();
+                }
             });
         }
+
+        setTouched(nextTouched);
+        setErrors(nextErrors);
+
+        const hasError = Object.values(nextErrors).some(Boolean);
+        if (hasError || !selectedMethod) return;
+
+        requestWithdrawalMutation.mutate({
+            amount: Number(withdrawalAmount),
+            paymentMethodId: selectedMethod._id,
+            paymentDetails,
+        });
     };
 
     return (
@@ -293,13 +270,10 @@ export default function Earning() {
             style={{ fontFamily: "'Inter', 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif" }}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{
-                duration: 0.8,
-                ease: [0.25, 0.46, 0.45, 0.94]
-            }}
+            transition={{ duration: 0.6 }}
         >
             <div className="earning-container__wrapper">
-                {/* Account Summary Cards */}
+                {/* Summary Cards */}
                 <motion.div
                     className="withdraw-summary-cards"
                     initial={{ opacity: 0, y: -20 }}
@@ -316,9 +290,11 @@ export default function Earning() {
                             <FaDollarSign />
                         </div>
                         <div className="withdraw-summary-card__content">
-                            <div className="withdraw-summary-card__label">{t('withdrawSection.confirmedRewards') || 'Confirmed Rewards'}</div>
+                            <div className="withdraw-summary-card__label">
+                                {t('withdrawSection.confirmedRewards') || 'Confirmed Rewards'}
+                            </div>
                             <div className="withdraw-summary-card__value">
-                                {earningsLoading ? '-' : `${parseFloat(amount).toFixed(6)} ${currency}`}
+                                {earningsLoading ? '-' : `${confirmedRewards.toFixed(6)} ${currency}`}
                             </div>
                         </div>
                     </motion.div>
@@ -333,9 +309,11 @@ export default function Earning() {
                             <FaDollarSign />
                         </div>
                         <div className="withdraw-summary-card__content">
-                            <div className="withdraw-summary-card__label">{t('withdrawSection.pendingRewards') || 'Pending Rewards'}</div>
+                            <div className="withdraw-summary-card__label">
+                                {t('withdrawSection.pendingRewards') || 'Pending Rewards'}
+                            </div>
                             <div className="withdraw-summary-card__value">
-                                {earningsLoading ? '-' : `${parseFloat(review).toFixed(6)} ${currency}`}
+                                {earningsLoading ? '-' : `${pendingRewards.toFixed(6)} ${currency}`}
                             </div>
                         </div>
                     </motion.div>
@@ -350,9 +328,11 @@ export default function Earning() {
                             <FaDollarSign />
                         </div>
                         <div className="withdraw-summary-card__content">
-                            <div className="withdraw-summary-card__label">{t('withdrawSection.totalEarnings') || 'Total Earnings'}</div>
+                            <div className="withdraw-summary-card__label">
+                                {t('withdrawSection.totalEarnings') || 'Total Earnings'}
+                            </div>
                             <div className="withdraw-summary-card__value">
-                                {earningsLoading ? '-' : `${parseFloat(totalEarnings).toFixed(6)} ${currency}`}
+                                {earningsLoading ? '-' : `${totalEarnings.toFixed(6)} ${currency}`}
                             </div>
                         </div>
                     </motion.div>
@@ -367,63 +347,68 @@ export default function Earning() {
                             <FaDollarSign />
                         </div>
                         <div className="withdraw-summary-card__content">
-                            <div className="withdraw-summary-card__label">{t('withdrawSection.withdrawable') || 'Withdrawable'}</div>
+                            <div className="withdraw-summary-card__label">
+                                {t('withdrawSection.withdrawable') || 'Available Balance'}
+                            </div>
                             <div className="withdraw-summary-card__value">
-                                {earningsLoading ? '-' : `${parseFloat(withdrawable).toFixed(6)} ${currency}`}
+                                {earningsLoading ? '-' : `${availableBalance.toFixed(6)} ${currency}`}
                             </div>
                         </div>
                     </motion.div>
                 </motion.div>
 
-                {/* Apply Section */}
+                {/* Withdrawal Request Form */}
                 <motion.div
                     className="withdraw-apply-section"
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
+                    transition={{ delay: 0.2 }}
                 >
                     <div className="withdraw-apply-section__header">
-                        <h2 className="withdraw-apply-section__title">{t('withdrawSection.apply') || 'Apply'}</h2>
-                        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                            {!earningsLoading && withdrawableAmount >= 10 && (
-                                <button 
-                                    type="button"
-                                    onClick={() => withdrawEarningsMutation.mutate()}
-                                    disabled={withdrawEarningsMutation.isLoading}
-                                    className="withdraw-apply-section__quick-withdraw"
-                                >
-                                    {withdrawEarningsMutation.isLoading 
-                                        ? (t('withdrawSection.withdrawing') || 'Withdrawing...')
-                                        : (t('withdrawSection.quickWithdrawAll') || 'Quick Withdraw All')}
-                                </button>
-                            )}
-                            <button 
-                                type="button"
-                                onClick={() => setShowRecordModal(true)}
-                                className="withdraw-apply-section__link"
-                            >
-                                {t('withdrawSection.record') || 'Record'} {language === 'ar' ? <HiArrowLeft /> : <HiArrowRight />}
-                            </button>
-                        </div>
+                        <h2 className="withdraw-apply-section__title">
+                            {t('withdrawSection.apply') || 'Request Withdrawal'}
+                        </h2>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setHistoryPage(1);
+                                setShowRecordModal(true);
+                            }}
+                            className="withdraw-apply-section__link"
+                        >
+                            {t('withdrawSection.record') || 'Record'}{' '}
+                            {language === 'ar' ? <HiArrowLeft /> : <HiArrowRight />}
+                        </button>
                     </div>
 
                     <form className="withdraw-apply-form" onSubmit={handleSubmit} noValidate>
                         <div className="withdraw-form-group">
                             <label className="withdraw-form-label">
-                                * {t('withdrawSection.withdrawalAmount') || 'Withdrawal amount'}
+                                * {t('withdrawSection.withdrawalAmount') || 'Withdrawal amount'} ({currency})
                             </label>
                             <input
-                                type="text"
+                                type="number"
+                                step="0.01"
+                                min="1"
                                 className={`withdraw-form-input ${touched.withdrawalAmount && errors.withdrawalAmount ? 'withdraw-form-input--error' : ''}`}
-                                placeholder={t('withdrawSection.withdrawalAmountPlaceholder') || 'Please enter the requested cash withdrawal amount'}
+                                placeholder={t('withdrawSection.withdrawalAmountPlaceholder') || 'Enter withdrawal amount'}
                                 value={withdrawalAmount}
                                 onChange={(e) => {
                                     setWithdrawalAmount(e.target.value);
                                     if (touched.withdrawalAmount) {
-                                        validateField('withdrawalAmount');
+                                        setErrors((prev) => ({
+                                            ...prev,
+                                            withdrawalAmount: validateAmount(e.target.value),
+                                        }));
                                     }
                                 }}
-                                onBlur={() => handleBlur('withdrawalAmount')}
+                                onBlur={() => {
+                                    setTouched((prev) => ({ ...prev, withdrawalAmount: true }));
+                                    setErrors((prev) => ({
+                                        ...prev,
+                                        withdrawalAmount: validateAmount(withdrawalAmount),
+                                    }));
+                                }}
                             />
                             {touched.withdrawalAmount && errors.withdrawalAmount && (
                                 <span className="withdraw-form-error">{errors.withdrawalAmount}</span>
@@ -437,69 +422,46 @@ export default function Earning() {
                             <div className="withdraw-form-input-wrapper withdraw-payment-dropdown-wrapper">
                                 <div
                                     className={`withdraw-form-input withdraw-payment-dropdown ${touched.paymentMethod && errors.paymentMethod ? 'withdraw-form-input--error' : ''} ${showPaymentDropdown ? 'withdraw-payment-dropdown--open' : ''}`}
-                                    onClick={() => setShowPaymentDropdown(!showPaymentDropdown)}
+                                    onClick={() => setShowPaymentDropdown((v) => !v)}
                                     onBlur={() => {
                                         setTimeout(() => setShowPaymentDropdown(false), 200);
-                                        handleBlur('paymentMethod');
                                     }}
                                     tabIndex={0}
                                 >
                                     <span className="withdraw-payment-dropdown__selected">
-                                        {(() => {
-                                            if (selectedPaymentServiceId) {
-                                                const service = activePaymentServices.find(s => (s._id || s.id) === selectedPaymentServiceId);
-                                                if (service) {
-                                                    const serviceName = service.accountName || service.paymentType || 'Payment Service';
-                                                    const credentials = service.credentials || {};
-                                                    const credentialValue = credentials.email || credentials.phone || credentials.accountNumber || credentials.walletAddress || '';
-                                                    return `${serviceName}${credentialValue ? ` (${credentialValue})` : ''} | ${t('withdrawSection.minAmount') || 'Min'}: ${service.minAmount || 10} ${currency}`;
-                                                }
-                                            }
-                                            return t('withdrawSection.paymentMethodPlaceholder') || 'Please select a payment method';
-                                        })()}
+                                        {selectedMethod
+                                            ? `${getMethodDisplayName(selectedMethod, language)} (${t(`payouts.methodTypes.${selectedMethod.type}`) || selectedMethod.type})`
+                                            : t('withdrawSection.paymentMethodPlaceholder') || 'Please select a payment method'}
                                     </span>
-                                    <HiChevronDown className={`withdraw-form-select-arrow ${showPaymentDropdown ? 'withdraw-form-select-arrow--open' : ''}`} />
+                                    <HiChevronDown
+                                        className={`withdraw-form-select-arrow ${showPaymentDropdown ? 'withdraw-form-select-arrow--open' : ''}`}
+                                    />
                                 </div>
                                 {showPaymentDropdown && (
                                     <div className="withdraw-payment-dropdown__menu">
-                                        {/* Payment Services from API */}
-                                        {activePaymentServices.length > 0 ? (
-                                            activePaymentServices.map((service) => {
-                                                const serviceId = service._id || service.id;
-                                                const isSelected = selectedPaymentServiceId === serviceId;
-                                                const serviceName = service.accountName || service.paymentType || 'Payment Service';
-                                                const credentials = service.credentials || {};
-                                                const credentialValue = credentials.email || credentials.phone || credentials.accountNumber || credentials.walletAddress || '';
-                                                
+                                        {paymentMethods.length > 0 ? (
+                                            paymentMethods.map((method) => {
+                                                const isSelected = selectedMethodId === method._id;
                                                 return (
                                                     <div
-                                                        key={`service-${serviceId}`}
+                                                        key={method._id}
                                                         className={`withdraw-payment-dropdown__option ${isSelected ? 'withdraw-payment-dropdown__option--selected' : ''}`}
-                                                        onClick={() => {
-                                                            setSelectedPaymentServiceId(serviceId);
-                                                            setPaymentMethod(service.paymentType || serviceName);
-                                                            setShowPaymentDropdown(false);
-                                                            if (touched.paymentMethod) {
-                                                                validateField('paymentMethod');
-                                                            }
+                                                        onMouseDown={(e) => {
+                                                            e.preventDefault();
+                                                            handleSelectMethod(method);
                                                         }}
                                                     >
                                                         <div className="withdraw-payment-dropdown__option-header">
                                                             <span className="withdraw-payment-dropdown__option-name">
-                                                                {serviceName} {service.isDefault && <span style={{ color: '#fbbf24', fontSize: '0.75rem' }}>({t('withdrawSection.default') || 'Default'})</span>}
+                                                                {getMethodDisplayName(method, language)}
                                                             </span>
                                                         </div>
                                                         <div className="withdraw-payment-dropdown__option-details">
                                                             <span className="withdraw-payment-dropdown__option-detail">
-                                                                {t('withdrawSection.type') || 'Type'}: <strong>{service.paymentType || 'N/A'}</strong>
-                                                            </span>
-                                                            {credentialValue && (
-                                                                <span className="withdraw-payment-dropdown__option-detail">
-                                                                    {t('withdrawSection.account') || 'Account'}: <strong>{credentialValue}</strong>
-                                                                </span>
-                                                            )}
-                                                            <span className="withdraw-payment-dropdown__option-detail">
-                                                                {t('withdrawSection.minAmount') || 'Min'}: <strong>{service.minAmount || 10} {currency}</strong>
+                                                                {t('withdrawSection.type') || 'Type'}:{' '}
+                                                                <strong>
+                                                                    {t(`payouts.methodTypes.${method.type}`) || method.type}
+                                                                </strong>
                                                             </span>
                                                         </div>
                                                     </div>
@@ -508,7 +470,7 @@ export default function Earning() {
                                         ) : (
                                             <div className="withdraw-payment-dropdown__empty">
                                                 <p style={{ padding: '1rem', textAlign: 'center', color: '#6b7280', fontSize: '0.875rem' }}>
-                                                    {t('withdrawSection.noPaymentServices') || 'No payment methods available. Please add a payment method first.'}
+                                                    {t('payouts.noPaymentMethods') || 'No payment methods are currently available.'}
                                                 </p>
                                             </div>
                                         )}
@@ -520,46 +482,61 @@ export default function Earning() {
                             )}
                         </div>
 
-                        <div className="withdraw-form-group">
-                            <label className="withdraw-form-label">
-                                * {t('withdrawSection.whatsappTelegram') || 'WhatsApp/Telegram accounts'}
-                            </label>
-                            <div className="withdraw-form-input-wrapper">
-                                <input
-                                    type="text"
-                                    className={`withdraw-form-input ${touched.whatsappTelegram && errors.whatsappTelegram ? 'withdraw-form-input--error' : ''}`}
-                                    placeholder={t('withdrawSection.whatsappTelegramPlaceholder') || 'Please enter the whatsapp/telegram accounts'}
-                                    value={whatsappTelegram}
-                                    onChange={(e) => {
-                                        setWhatsappTelegram(e.target.value);
-                                        if (touched.whatsappTelegram) {
-                                            validateField('whatsappTelegram');
-                                        }
-                                    }}
-                                    onBlur={() => handleBlur('whatsappTelegram')}
-                                    maxLength={50}
-                                />
-                                <span className="withdraw-form-char-count">{whatsappTelegram.length}/50</span>
-                            </div>
-                            {touched.whatsappTelegram && errors.whatsappTelegram && (
-                                <span className="withdraw-form-error">{errors.whatsappTelegram}</span>
-                            )}
-                        </div>
+                        {/* Dynamic Payment Method Fields */}
+                        {selectedMethod ? (
+                            (selectedMethod.fields || []).map((field) => {
+                                const fieldErrKey = `field:${field.key}`;
+                                const label = getFieldLabel(field, language);
+                                const inputType =
+                                    field.type === 'email'
+                                        ? 'email'
+                                        : field.type === 'phone'
+                                          ? 'tel'
+                                          : 'text';
+                                return (
+                                    <div key={field.key} className="withdraw-form-group">
+                                        <label className="withdraw-form-label">
+                                            {field.required ? '* ' : ''}
+                                            {label}
+                                        </label>
+                                        <input
+                                            type={inputType}
+                                            className={`withdraw-form-input ${touched[fieldErrKey] && errors[fieldErrKey] ? 'withdraw-form-input--error' : ''}`}
+                                            placeholder={label}
+                                            value={fieldValues[field.key] || ''}
+                                            maxLength={300}
+                                            onChange={(e) => handleFieldChange(field, e.target.value)}
+                                            onBlur={() => handleFieldBlur(field)}
+                                            required={field.required}
+                                        />
+                                        {touched[fieldErrKey] && errors[fieldErrKey] && (
+                                            <span className="withdraw-form-error">{errors[fieldErrKey]}</span>
+                                        )}
+                                    </div>
+                                );
+                            })
+                        ) : (
+                            <p style={{ color: '#6b7280', fontSize: '0.875rem', margin: 0 }}>
+                                {t('payouts.selectMethodFirst') || 'Select a payment method to enter payout details.'}
+                            </p>
+                        )}
 
-                        <button 
-                            type="submit" 
+                        <button
+                            type="submit"
                             className="withdraw-submit-button"
-                            disabled={requestWithdrawalMutation.isLoading}
+                            disabled={requestWithdrawalMutation.isLoading || paymentMethods.length === 0}
                         >
-                            {requestWithdrawalMutation.isLoading 
-                                ? (t('withdrawSection.submitting') || 'Submitting...') 
-                                : (t('withdrawSection.withdraw') || 'Withdraw')}
+                            {requestWithdrawalMutation.isLoading
+                                ? t('withdrawSection.submitting') || 'Submitting...'
+                                : t('withdrawSection.withdraw') || 'Withdraw'}
                         </button>
                     </form>
 
                     <div className="withdraw-notice">
                         <div className="withdraw-notice__title">{t('withdrawSection.notice') || 'Notice:'}</div>
-                        <div className="withdraw-notice__text">{t('withdrawSection.noticeText') || 'The amount of cash withdrawal must be ≥ 10 US dollars If not please go ahead and share the link'}</div>
+                        <div className="withdraw-notice__text">
+                            {t('payouts.amountMinimumOne') || 'Minimum withdrawal amount is 1 USD'}
+                        </div>
                     </div>
                 </motion.div>
 
@@ -594,61 +571,32 @@ export default function Earning() {
                                 </div>
 
                                 <div className="withdraw-record-modal__content">
-                                    {/* Filter Buttons */}
                                     <div className="withdraw-filters">
-                                        <button
-                                            type="button"
-                                            onClick={() => setViewMode('all')}
-                                            className={`withdraw-filter-btn ${viewMode === 'all' ? 'active' : ''}`}
-                                        >
-                                            <span className="filter-title">
-                                                {t('withdrawSection.allWithdrawals') || 'All'}
-                                            </span>
-                                            <span className="filter-desc">
-                                                {t('withdrawSection.allWithdrawalsDesc') || 'View all withdrawal requests'}
-                                            </span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setViewMode('pending')}
-                                            className={`withdraw-filter-btn ${viewMode === 'pending' ? 'active' : ''}`}
-                                        >
-                                            <span className="filter-title">
-                                                {t('withdrawSection.pending') || 'Pending'}
-                                            </span>
-                                            <span className="filter-desc">
-                                                {t('withdrawSection.pendingDesc') || 'View pending withdrawals'}
-                                            </span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setViewMode('approved')}
-                                            className={`withdraw-filter-btn ${viewMode === 'approved' ? 'active' : ''}`}
-                                        >
-                                            <span className="filter-title">
-                                                {t('withdrawSection.approvedOnly') || 'Approved'}
-                                            </span>
-                                            <span className="filter-desc">
-                                                {t('withdrawSection.approvedOnlyDesc') || 'View approved withdrawals only'}
-                                            </span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setViewMode('rejected')}
-                                            className={`withdraw-filter-btn ${viewMode === 'rejected' ? 'active' : ''}`}
-                                        >
-                                            <span className="filter-title">
-                                                {t('withdrawSection.rejected') || 'Rejected'}
-                                            </span>
-                                            <span className="filter-desc">
-                                                {t('withdrawSection.rejectedDesc') || 'View rejected withdrawals'}
-                                            </span>
-                                        </button>
+                                        {[
+                                            { key: 'all', title: t('withdrawSection.allWithdrawals') || 'All', desc: t('withdrawSection.allWithdrawalsDesc') || 'All requests' },
+                                            { key: 'pending', title: t('withdrawSection.pending') || 'Pending', desc: t('withdrawSection.pendingDesc') || 'Pending requests' },
+                                            { key: 'approved', title: t('withdrawSection.approvedOnly') || 'Approved', desc: t('withdrawSection.approvedOnlyDesc') || 'Approved requests' },
+                                            { key: 'completed', title: t('payouts.completed') || 'Completed', desc: t('payouts.completedDesc') || 'Completed payouts' },
+                                            { key: 'rejected', title: t('withdrawSection.rejected') || 'Rejected', desc: t('withdrawSection.rejectedDesc') || 'Rejected requests' },
+                                        ].map((tab) => (
+                                            <button
+                                                key={tab.key}
+                                                type="button"
+                                                onClick={() => {
+                                                    setViewMode(tab.key);
+                                                    setHistoryPage(1);
+                                                }}
+                                                className={`withdraw-filter-btn ${viewMode === tab.key ? 'active' : ''}`}
+                                            >
+                                                <span className="filter-title">{tab.title}</span>
+                                                <span className="filter-desc">{tab.desc}</span>
+                                            </button>
+                                        ))}
                                     </div>
 
                                     {isLoadingWithdrawals ? (
                                         <div className="withdraw-record-modal__loading">
-                                            <div className="withdraw-record-modal__spinner"></div>
+                                            <div className="withdraw-record-modal__spinner" />
                                             <p>{t('withdrawSection.loadingHistory') || 'Loading withdrawal history...'}</p>
                                         </div>
                                     ) : displayWithdrawals.length > 0 ? (
@@ -659,44 +607,39 @@ export default function Earning() {
                                                         <th>{t('withdrawSection.tableDate') || 'Date'}</th>
                                                         <th>{t('withdrawSection.tableAmount') || 'Amount'}</th>
                                                         <th>{t('withdrawSection.tableMethod') || 'Payment Method'}</th>
+                                                        <th>{t('payouts.details') || 'Details'}</th>
                                                         <th>{t('withdrawSection.tableStatus') || 'Status'}</th>
                                                         <th>{t('withdrawSection.tableReason') || 'Reason'}</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
                                                     {displayWithdrawals.map((withdrawal, index) => (
-                                                        <tr key={withdrawal?._id || withdrawal?.id || index}>
+                                                        <tr key={withdrawal?._id || index}>
                                                             <td className="withdraw-date">
-                                                                {withdrawal?.createdAt 
+                                                                {withdrawal?.createdAt
                                                                     ? new Date(withdrawal.createdAt).toLocaleDateString()
-                                                                    : withdrawal?.date || '-'}
+                                                                    : '-'}
                                                             </td>
                                                             <td className="withdraw-amount">
-                                                                {withdrawal?.amount || '-'} {withdrawal?.currency || currency}
+                                                                {withdrawal?.amount ?? '-'} {currency}
                                                             </td>
                                                             <td className="withdraw-payment-method">
-                                                                {withdrawal?.paymentMethod || '-'}
+                                                                {formatWithdrawalMethod(withdrawal, language)}
                                                             </td>
+                                                            <td>{formatWithdrawalDetails(withdrawal, language)}</td>
                                                             <td>
-                                                                <span className={`withdraw-status withdraw-status--${(withdrawal?.status || 'pending').toLowerCase()}`}>
-                                                                    {withdrawal?.status || 'Pending'}
+                                                                <span
+                                                                    className={`withdraw-status withdraw-status--${(withdrawal?.status || 'pending').toLowerCase()}`}
+                                                                >
+                                                                    {withdrawal?.status || 'pending'}
                                                                 </span>
                                                             </td>
                                                             <td className="withdraw-reason">
-                                                                {withdrawal?.status === 'rejected' ? (() => {
-                                                                    // Check for reason in various possible field names
-                                                                    const rejectionReason = withdrawal?.reason || 
-                                                                                           withdrawal?.rejectionReason || 
-                                                                                           withdrawal?.rejectReason ||
-                                                                                           withdrawal?.rejection_reason;
-                                                                    return rejectionReason ? (
-                                                                        <span className="withdraw-reason__text" title={rejectionReason}>
-                                                                            {rejectionReason}
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="withdraw-reason__empty">-</span>
-                                                                    );
-                                                                })() : (
+                                                                {withdrawal?.status === 'rejected' && withdrawal?.rejectionReason ? (
+                                                                    <span className="withdraw-reason__text" title={withdrawal.rejectionReason}>
+                                                                        {withdrawal.rejectionReason}
+                                                                    </span>
+                                                                ) : (
                                                                     <span className="withdraw-reason__empty">-</span>
                                                                 )}
                                                             </td>
@@ -713,6 +656,44 @@ export default function Earning() {
                                             <p>{t('withdrawSection.noWithdrawalHistory') || 'No withdrawal history found'}</p>
                                         </div>
                                     )}
+
+                                    {!isLoadingWithdrawals &&
+                                        historyMeta &&
+                                        (historyMeta.totalPages > 1 || historyPage > 1) && (
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    marginTop: '1rem',
+                                                }}
+                                            >
+                                                <button
+                                                    type="button"
+                                                    className="withdraw-filter-btn"
+                                                    disabled={historyPage <= 1}
+                                                    onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                                                >
+                                                    {t('payouts.prev') || 'Previous'}
+                                                </button>
+                                                <span style={{ fontSize: '0.875rem', color: '#4b5563' }}>
+                                                    {t('payouts.pageOf', {
+                                                        page: historyMeta.page,
+                                                        totalPages: Math.max(1, historyMeta.totalPages),
+                                                    })}
+                                                </span>
+                                                <button
+                                                    type="button"
+                                                    className="withdraw-filter-btn"
+                                                    disabled={historyPage >= historyMeta.totalPages}
+                                                    onClick={() =>
+                                                        setHistoryPage((p) => Math.min(historyMeta.totalPages, p + 1))
+                                                    }
+                                                >
+                                                    {t('payouts.next') || 'Next'}
+                                                </button>
+                                            </div>
+                                        )}
                                 </div>
                             </motion.div>
                         </motion.div>

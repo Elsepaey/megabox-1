@@ -9,6 +9,7 @@ import { jwtDecode } from "jwt-decode";
 import Loading from '../components/Loading/Loading';
 import { useQuery } from 'react-query';
 import { userService } from '../services';
+import { isStaffRole } from '../utils/roles';
 
 
 export default function DashboardLayout({ role }) {
@@ -60,55 +61,20 @@ export default function DashboardLayout({ role }) {
                 return;
             }
 
-            if (tokenRole === "Owner" && role !== "Owner") {
-                if (!location.pathname.startsWith("/Owner")) {
-                    navigate("/Owner/profile", { replace: true });
-                    return;
-                }
-            }
+            const tokenIsStaff = isStaffRole(tokenRole);
+            const staffLayout = role === "Owner";
 
-            if (tokenRole !== "Owner" && role === "Owner") {
-                if (location.pathname.startsWith("/Owner")) {
-                    if (tokenRole === "User") {
-                        navigate("/dashboard", { replace: true });
-                    } else {
-                        navigate("/login", { replace: true });
-                    }
-                    return;
-                }
-            }
-
-            if ((tokenRole === "Owner" && role === "Owner") ||
-                (tokenRole !== "Owner" && role !== "Owner")) {
-                setRoleLoading(false);
+            if (tokenIsStaff && !staffLayout) {
+                navigate("/Owner/profile", { replace: true });
                 return;
             }
 
-            auth.getUserRole(idTracker()).then(fetchedRole => {
-                if (fetchedRole === "Owner" && tokenRole !== "Owner" && role !== "Owner") {
-                    setRoleLoading(false);
-                    return;
-                }
+            if (!tokenIsStaff && staffLayout) {
+                navigate(tokenRole === "User" ? "/dashboard" : "/login", { replace: true });
+                return;
+            }
 
-                if (fetchedRole !== "Owner" && tokenRole === "Owner" && role === "Owner") {
-                    setRoleLoading(false);
-                    return;
-                }
-
-                if (fetchedRole === "Owner" && role !== "Owner" && !location.pathname.startsWith("/Owner")) {
-                    navigate("/Owner/profile", { replace: true });
-                    return;
-                }
-
-                if (fetchedRole !== "Owner" && role === "Owner" && location.pathname.startsWith("/Owner")) {
-                    navigate("/dashboard", { replace: true });
-                    return;
-                }
-
-                setRoleLoading(false);
-            }).catch(() => {
-                setRoleLoading(false);
-            });
+            setRoleLoading(false);
         } else {
             navigate("/login")
         }

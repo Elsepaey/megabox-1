@@ -172,7 +172,7 @@ export async function cancelVideoUpload(fileId) {
     if (upload) {
         try {
             await upload.abort(true);
-        } catch (_) {
+        } catch {
             /* ignore */
         }
     }

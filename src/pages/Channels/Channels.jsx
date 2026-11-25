@@ -20,55 +20,6 @@ export default function Channels() {
     const navigate = useNavigate();
     const [showSubscribeModal, setShowSubscribeModal] = useState(false);
 
-    // Mockup data structure for endpoint preview
-    const mockupData = useMemo(() => ({
-        success: true,
-        message: t('channels.mockup.message') || "تم جلب القنوات",
-        data: {
-            subscribedChannels: [
-                {
-                    _id: "6921b7309ad89d1d8ba8fb3f",
-                    name: t('channels.mockup.channel1.name') || "Technology Channel",
-                    description: t('channels.mockup.channel1.description') || "Latest tech news and updates",
-                    image: {
-                        secure_url: "https://via.placeholder.com/400x300/6366f1/ffffff?text=Technology+Channel",
-                        public_id: "channels/tech-channel"
-                    },
-                    filesCount: 15,
-                    subscribersCount: 1250,
-                    createdAt: "2025-11-22T13:14:24.111Z",
-                    createdBy: "691393863050c43d28b86b81"
-                },
-                {
-                    _id: "6921b75b9ad89d1d8ba8fb8e",
-                    name: t('channels.mockup.channel2.name') || "Design Inspiration",
-                    description: t('channels.mockup.channel2.description') || "Creative designs and inspiration for designers",
-                    image: {
-                        secure_url: "https://via.placeholder.com/400x300/8b5cf6/ffffff?text=Design+Channel",
-                        public_id: "channels/design-channel"
-                    },
-                    filesCount: 8,
-                    subscribersCount: 890,
-                    createdAt: "2025-11-22T13:15:07.970Z",
-                    createdBy: "691393863050c43d28b86b81"
-                },
-                {
-                    _id: "6921c1239ad89d1d8ba8fc12",
-                    name: t('channels.mockup.channel3.name') || "Programming Tutorials",
-                    description: t('channels.mockup.channel3.description') || "Learn programming from scratch",
-                    image: {
-                        secure_url: "https://via.placeholder.com/400x300/10b981/ffffff?text=Programming",
-                        public_id: "channels/programming-channel"
-                    },
-                    filesCount: 32,
-                    subscribersCount: 2100,
-                    createdAt: "2025-11-20T09:15:00.000Z",
-                    createdBy: "691393863050c43d28b86b82"
-                }
-            ]
-        }
-    }), [t]);
-
     // Close sidenav when modal opens
     useEffect(() => {
         if (showSubscribeModal) {
@@ -84,35 +35,28 @@ export default function Channels() {
         }
     }, [showSubscribeModal]);
 
-    // Form states
     const [channelId, setChannelId] = useState('');
+    const [page, setPage] = useState(1);
+    const PAGE_LIMIT = 12;
 
-    // Fetch subscribed channels
     const { data: channelsData, isLoading: channelsLoading } = useQuery(
-        'mySubscribedChannels',
-        () => channelService.getMySubscribedChannels(Token.MegaBox),
+        ['mySubscribedChannels', page],
+        () => channelService.getMySubscribedChannels(Token.MegaBox, { page, limit: PAGE_LIMIT }),
         {
             enabled: !!Token.MegaBox,
-            cacheTime: 300000
+            cacheTime: 300000,
+            keepPreviousData: true,
         }
     );
 
-    // Get subscribed channels from the response
     const subscribedChannels = useMemo(() => {
-        const data = channelsData?.data || channelsData;
-        const channels = data?.subscribedChannels || [];
-        
-        // Show mockup data if no real data exists
-        if (channels.length === 0) {
-            return mockupData.data.subscribedChannels;
-        }
-        
-        return channels;
-    }, [channelsData, mockupData]);
-
-    // Subscribe to channel mutation
+        if (Array.isArray(channelsData?.data)) return channelsData.data;
+        if (Array.isArray(channelsData?.data?.subscribedChannels)) return channelsData.data.subscribedChannels;
+        return [];
+    }, [channelsData]);
+    const totalPages = channelsData?.meta?.totalPages || 1;
     const subscribeMutation = useMutation(
-        (channelId) => channelService.subscribeToChannel(channelId, Token.MegaBox),
+        (id) => channelService.subscribeToChannel(id, Token.MegaBox),
         {
             onSuccess: () => {
                 queryClient.invalidateQueries('mySubscribedChannels');
@@ -122,6 +66,14 @@ export default function Channels() {
         }
     );
 
+    const unsubscribeMutation = useMutation(
+        (id) => channelService.unsubscribeFromChannel(id, Token.MegaBox),
+        {
+            onSuccess: () => {
+                queryClient.invalidateQueries('mySubscribedChannels');
+            }
+        }
+    );
     const handleSubscribe = (e) => {
         e.preventDefault();
         if (!channelId) {
@@ -153,54 +105,64 @@ export default function Channels() {
                 {/* Subscribed Channels Grid */}
                 {subscribedChannels && subscribedChannels.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {subscribedChannels.map((channel) => (
-                            <motion.div
-                                key={channel._id || channel.id}
-                                className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 p-6 hover:shadow-xl transition-shadow"
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                whileHover={{ scale: 1.02 }}
-                            >
-                                {(channel.image || (typeof channel.image === 'object' && channel.image?.secure_url)) && (
-                                    <img
-                                        src={typeof channel.image === 'object' ? channel.image.secure_url : channel.image}
-                                        alt={channel.name || t('channels.placeholder.channelName') || 'Channel'}
-                                        className="w-full h-48 object-cover rounded-lg mb-4"
-                                        onError={(e) => {
-                                            e.target.style.display = 'none';
-                                        }}
-                                    />
-                                )}
-                                {!channel.image && (!channel.image || (typeof channel.image === 'object' && !channel.image?.secure_url)) && (
-                                    <div className="w-full h-48 bg-indigo-100 rounded-lg mb-4 flex items-center justify-center">
-                                        <span className="text-indigo-400 text-sm">{t('channels.placeholder.channelName') || 'No Image'}</span>
-                                    </div>
-                                )}
-                                <h3 className="text-xl font-semibold text-indigo-900 mb-2">
-                                    {channel.name || t('channels.placeholder.channelName') || 'Unnamed Channel'}
-                                </h3>
-                                <p className="text-gray-600 text-sm mb-4">
-                                    {channel.description || t('channels.noDescription') || 'No description'}
-                                </p>
-                                {/* Placeholder for channel stats */}
-                                <div className="flex flex-wrap gap-3 text-xs text-gray-500 mb-3">
-                                    {channel.filesCount !== undefined && (
-                                        <span>{t('channels.filesCount', { count: channel.filesCount }) || `${channel.filesCount} files`}</span>
-                                    )}
-                                    {channel.subscribersCount !== undefined && (
-                                        <span>{t('channels.subscribersCount', { count: channel.subscribersCount }) || `${channel.subscribersCount} subscribers`}</span>
-                                    )}
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        navigate(`/dashboard/channels/${channel._id || channel.id}/files`);
-                                    }}
-                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition-colors"
+                        {subscribedChannels.map((channel) => {
+                            const coverUrl = channel.coverImage?.secure_url
+                                || channel.iconId?.image?.secure_url
+                                || (typeof channel.image === 'object' ? channel.image?.secure_url : channel.image);
+                            const subCount = channel.subscriberCount ?? channel.subscribersCount;
+                            return (
+                                <motion.div
+                                    key={channel._id || channel.id}
+                                    className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 p-6 hover:shadow-xl transition-shadow"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    whileHover={{ scale: 1.02 }}
                                 >
-                                    {t('channels.viewFiles') || 'View Files'}
-                                </button>
-                            </motion.div>
-                        ))}
+                                    {coverUrl ? (
+                                        <img
+                                            src={coverUrl}
+                                            alt={channel.name || t('channels.placeholder.channelName') || 'Channel'}
+                                            className="w-full h-48 object-cover rounded-lg mb-4"
+                                            onError={(e) => {
+                                                e.target.style.display = 'none';
+                                            }}
+                                        />
+                                    ) : (
+                                        <div className="w-full h-48 bg-indigo-100 rounded-lg mb-4 flex items-center justify-center">
+                                            <span className="text-indigo-400 text-sm">{t('channels.placeholder.channelName') || 'No Image'}</span>
+                                        </div>
+                                    )}
+                                    <h3 className="text-xl font-semibold text-indigo-900 mb-2">
+                                        {channel.name || t('channels.placeholder.channelName') || 'Unnamed Channel'}
+                                    </h3>
+                                    <p className="text-gray-600 text-sm mb-4">
+                                        {channel.description || t('channels.noDescription') || 'No description'}
+                                    </p>
+                                    <div className="flex flex-wrap gap-3 text-xs text-gray-500 mb-3">
+                                        {subCount !== undefined && (
+                                            <span>{t('channels.subscribersCount', { count: subCount }) || `${subCount} subscribers`}</span>
+                                        )}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                navigate(`/dashboard/channels/${channel._id || channel.id}/files`);
+                                            }}
+                                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition-colors"
+                                        >
+                                            {t('channels.viewFiles') || 'View Files'}
+                                        </button>
+                                        <button
+                                            onClick={() => unsubscribeMutation.mutate(channel._id || channel.id)}
+                                            disabled={unsubscribeMutation.isLoading}
+                                            className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-sm transition-colors disabled:opacity-50"
+                                        >
+                                            {t('filesV2.unsubscribe') || 'Unsubscribe'}
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            );
+                        })}
                     </div>
                 ) : (
                     <div className="text-center py-12 bg-white rounded-xl shadow-lg border-2 border-indigo-100">
@@ -213,6 +175,29 @@ export default function Channels() {
                             className="mt-4 text-indigo-600 hover:text-indigo-700 font-medium"
                         >
                             {t('channels.subscribeToChannel') || 'Subscribe to a channel'}
+                        </button>
+                    </div>
+                )}
+                {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-3 mt-8">
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            disabled={page <= 1}
+                            className="px-4 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                        >
+                            {t('filesV2.prev') || 'Previous'}
+                        </button>
+                        <span className="text-sm text-indigo-900 font-medium">
+                            {page} / {totalPages}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                            disabled={page >= totalPages}
+                            className="px-4 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                        >
+                            {t('filesV2.next') || 'Next'}
                         </button>
                     </div>
                 )}

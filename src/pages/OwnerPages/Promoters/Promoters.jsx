@@ -1,517 +1,150 @@
-import React, { useRef, useState, useMemo, useEffect } from 'react'
-
-import "./Promoters.scss"
-import { useQuery, useQueryClient } from 'react-query';
-// eslint-disable-next-line no-unused-vars
-import { motion, useInView, AnimatePresence } from 'framer-motion';
-import { API_URL, adminService, promoterService } from '../../../services/api';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { MdDelete, MdClose } from "react-icons/md";
-import { MdAttachMoney } from "react-icons/md";
-import { FaCrown } from "react-icons/fa";
+import React from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { FaBullhorn } from 'react-icons/fa';
 import { useLanguage } from '../../../context/LanguageContext';
-import { useCookies } from 'react-cookie';
-import { toast } from 'react-toastify';
-import { ToastOptions } from '../../../helpers/ToastOptions';
-import SearchFilter from '../../../components/SearchFilter/SearchFilter';
-import Pagination from '../../../components/Pagination/Pagination';
-import { useFormik } from 'formik';
-import * as Yup from 'yup';
+import promotersAdmin from '../../../services/admin/promotersAdmin';
+import {
+    AdminPage,
+    AdminTable,
+    FilterBar,
+    StatusBadge,
+} from '../_shared/AdminUI';
+import useAdminList from '../_shared/useAdminList';
+import { formatDate, shortId } from '../_shared/formatters';
+
+const INITIAL_FILTERS = {
+    userId: '',
+    username: '',
+    promoterCode: '',
+    plan: '',
+    from: '',
+    to: '',
+};
 
 export default function Promoters() {
-    const { t } = useLanguage();
-    const [searchParams, setSearchParams] = useSearchParams();
-    const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
-    const [filters, setFilters] = useState({});
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 10;
-    const [deleteConfirm, setDeleteConfirm] = useState(null);
-    const [isDeleting, setIsDeleting] = useState(false);
-    const [premiumModal, setPremiumModal] = useState(null);
-    const [cookies] = useCookies(['MegaBox']);
-    const token = cookies.MegaBox;
-    const queryClient = useQueryClient();
+    const { t, language } = useLanguage();
+    const navigate = useNavigate();
 
-    // Update URL when search term changes
-    useEffect(() => {
-        if (searchTerm) {
-            setSearchParams({ search: searchTerm });
-        } else {
-            setSearchParams({});
-        }
-    }, [searchTerm, setSearchParams]);
-
-    const animationRef = useRef();
-    const animationInView = useInView(animationRef, { once: true });
-    const navigate = useNavigate()
-
-    const AllPromoters = async () => {
-        const response = await promoterService.getAllPromoters(token);
-        return response?.data?.promoters || response?.promoters || response;
-    }
-
-    const { data: Promoters } = useQuery("getAllPromoters", AllPromoters, {
-        cacheTime: 300000,
-        onError: () => {
-            navigate("/login")
-        }
-    })
-
-    // Filter promoters based on search and filters
-    const filteredPromoters = useMemo(() => {
-        if (!Promoters) return [];
-
-        return Promoters.filter((promoter) => {
-            // Search filter
-            if (searchTerm) {
-                const searchLower = searchTerm.toLowerCase();
-                const searchableText = `${promoter.username || ''} ${promoter.email || ''}`.toLowerCase();
-                if (!searchableText.includes(searchLower)) {
-                    return false;
-                }
-            }
-
-            // Watching plan filter
-            if (filters.watchingPlan !== undefined) {
-                const hasWatchingPlan = promoter.watchingplan === true || promoter.watchingplan === "true";
-                if (filters.watchingPlan === 'subscribed' && !hasWatchingPlan) {
-                    return false;
-                }
-                if (filters.watchingPlan === 'unsubscribed' && hasWatchingPlan) {
-                    return false;
-                }
-            }
-
-            // Downloads plan filter
-            if (filters.downloadsPlan !== undefined) {
-                const hasDownloadsPlan = promoter.Downloadsplan === true || promoter.Downloadsplan === "true";
-                if (filters.downloadsPlan === 'subscribed' && !hasDownloadsPlan) {
-                    return false;
-                }
-                if (filters.downloadsPlan === 'unsubscribed' && hasDownloadsPlan) {
-                    return false;
-                }
-            }
-
-            // Premium status filter
-            if (filters.premiumStatus !== undefined) {
-                if (filters.premiumStatus === 'premium' && !promoter.isBrimume) {
-                    return false;
-                }
-                if (filters.premiumStatus === 'notPremium' && promoter.isBrimume) {
-                    return false;
-                }
-            }
-
-            return true;
-        });
-    }, [Promoters, searchTerm, filters]);
-
-    // Pagination logic
-    const totalPages = Math.ceil(filteredPromoters.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedPromoters = filteredPromoters.slice(startIndex, endIndex);
-
-    // Reset to page 1 when filters change
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm, filters]);
-
-    // Handle delete promoter
-    const handleDeletePromoter = async () => {
-        if (!deleteConfirm) return;
-        
-        setIsDeleting(true);
-        try {
-            await adminService.deletePromoter(deleteConfirm._id || deleteConfirm.id, token);
-            toast.success(t("adminPromoters.promoterDeletedSuccess") || "Promoter deleted successfully", ToastOptions("success"));
-            queryClient.invalidateQueries("getAllPromoters");
-            setDeleteConfirm(null);
-        } catch (error) {
-            toast.error(error.response?.data?.message || t("adminPromoters.deletePromoterFailed") || "Failed to delete promoter", ToastOptions("error"));
-        } finally {
-            setIsDeleting(false);
-        }
-    };
-
-    // Handle toggle premium status (remove premium)
-    const handleTogglePremium = async (userId, currentPremiumStatus) => {
-        try {
-            if (!userId) {
-                toast.error(t("adminPromoters.invalidUserId") || "Invalid user ID", ToastOptions("error"));
-                return;
-            }
-            
-            // Toggle: if currently premium, deactivate; if not premium, activate
-            await adminService.toggleBrimumeByOwner(String(userId), !currentPremiumStatus, undefined, token);
-            queryClient.invalidateQueries("getAllPromoters");
-            setPremiumModal(null);
-            premiumFormik.resetForm();
-        } catch {
-            // Error is handled in the service
-        }
-    };
-
-    // Set promoter premium with expiration date
-    const handleSetPremium = async (userId, expirationDate) => {
-        try {
-            if (!userId) {
-                toast.error(t("adminPromoters.invalidUserId") || "Invalid user ID", ToastOptions("error"));
-                return;
-            }
-            
-            // Calculate duration in days from expiration date
-            const now = new Date();
-            const expiration = new Date(expirationDate);
-            const durationDays = Math.ceil((expiration - now) / (1000 * 60 * 60 * 24));
-            
-            if (durationDays <= 0) {
-                toast.error(t("adminUsers.expirationDateMustBeFuture") || t("adminPromoters.expirationDateMustBeFuture") || "Expiration date must be in the future", ToastOptions("error"));
-                return;
-            }
-
-            await adminService.toggleBrimumeByOwner(String(userId), true, durationDays, token);
-            queryClient.invalidateQueries("getAllPromoters");
-            setPremiumModal(null);
-            premiumFormik.resetForm();
-        } catch {
-            // Error is handled in the service
-        }
-    };
-
-    // Memoize the validation schema to prevent recreation on every render
-    // Use .test() for dynamic date validation to check against current date at validation time
-    const premiumValidation = useMemo(() => {
-        const futureDateMessage = t("adminUsers.expirationDateMustBeFuture") || t("adminPromoters.expirationDateMustBeFuture");
-        const requiredMessage = t("adminUsers.expirationDateRequired") || t("adminPromoters.expirationDateRequired");
-        
-        return Yup.object({
-            expirationDate: Yup.date()
-                .required(requiredMessage)
-                .test(
-                    'is-future-date',
-                    futureDateMessage,
-                    function(value) {
-                        if (!value) return true; // Let required() handle empty values
-                        return new Date(value) > new Date();
-                    }
-                ),
-        });
-    }, [t]);
-
-    // Initialize formik after handleSetPremium is defined
-    const premiumFormik = useFormik({
-        initialValues: {
-            expirationDate: '',
-        },
-        validationSchema: premiumValidation,
-        onSubmit: (values) => {
-            if (premiumModal) {
-                const userId = premiumModal._id || premiumModal.id;
-                if (userId) {
-                    handleSetPremium(String(userId), values.expirationDate);
-                }
-            }
-        },
-        enableReinitialize: true,
+    const list = useAdminList('staff:promoters', promotersAdmin.list, {
+        initialFilters: INITIAL_FILTERS,
+        limit: 20,
     });
 
-    // Filter configuration
-    const filterConfig = [
+    const filterFields = [
+        { key: 'userId', label: t('staffPromoters.userId'), type: 'text' },
         {
-            key: 'watchingPlan',
-            label: t('adminPromoters.watchingPlan'),
-            allLabel: t('searchFilter.all'),
-            options: [
-                { value: 'subscribed', label: t('adminPromoters.subscribed') },
-                { value: 'unsubscribed', label: t('adminPromoters.unsubscribed') }
-            ]
+            key: 'username',
+            label: t('staffPromoters.username'),
+            type: 'text',
+            placeholder: t('staffPromoters.usernamePlaceholder'),
         },
         {
-            key: 'downloadsPlan',
-            label: t('adminPromoters.downloadsPlan'),
-            allLabel: t('searchFilter.all'),
+            key: 'promoterCode',
+            label: t('staffPromoters.promoterCode'),
+            type: 'text',
+            placeholder: t('staffPromoters.promoterCodePlaceholder'),
+        },
+        {
+            key: 'plan',
+            label: t('staffPromoters.plan'),
+            type: 'select',
             options: [
-                { value: 'subscribed', label: t('adminPromoters.subscribed') },
-                { value: 'unsubscribed', label: t('adminPromoters.unsubscribed') }
-            ]
-        }
+                { value: 'views', label: t('staffPromoters.planViews') },
+                { value: 'installs', label: t('staffPromoters.planInstalls') },
+            ],
+        },
+        { key: 'from', label: t('staffPromoters.joinedFrom'), type: 'date' },
+        { key: 'to', label: t('staffPromoters.joinedTo'), type: 'date' },
+    ];
+
+    const planLabel = (plan) => {
+        if (plan === 'views') return t('staffPromoters.planViews');
+        if (plan === 'installs') return t('staffPromoters.planInstalls');
+        return '—';
+    };
+
+    const columns = [
+        {
+            key: 'username',
+            header: t('staffPromoters.username'),
+            render: (row) => row.username || '—',
+        },
+        {
+            key: 'userId',
+            header: t('staffPromoters.userId'),
+            render: (row) => <span title={row.userId}>{shortId(row.userId)}</span>,
+        },
+        {
+            key: 'promoterCode',
+            header: t('staffPromoters.promoterCode'),
+            render: (row) => row.promoterCode || '—',
+        },
+        {
+            key: 'plan',
+            header: t('staffPromoters.plan'),
+            render: (row) =>
+                row.plan ? (
+                    <StatusBadge tone={row.plan === 'installs' ? 'info' : 'success'}>
+                        {planLabel(row.plan)}
+                    </StatusBadge>
+                ) : (
+                    '—'
+                ),
+        },
+        {
+            key: 'joinedAt',
+            header: t('staffPromoters.joinedAt'),
+            render: (row) => formatDate(row.joinedAt, language),
+        },
+        {
+            key: 'actions',
+            header: t('staffCommon.actions'),
+            render: (row) => (
+                <div
+                    style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <Link
+                        to={`/Owner/Promoter/${row.userId}`}
+                        className="admin-btn admin-btn--primary admin-btn--sm"
+                    >
+                        {t('staffPromoters.viewDetail')}
+                    </Link>
+                    <Link
+                        to={`/Owner/Users/${row.userId}`}
+                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                    >
+                        {t('staffPromoters.openUser')}
+                    </Link>
+                </div>
+            ),
+        },
     ];
 
     return (
-        <div className="admin-promoters-page">
-            <div className="admin-promoters-page__wrapper">
-            <motion.div
-                layout
-                ref={animationRef}
-                initial={{ opacity: 0 }}
-                animate={animationInView && { opacity: 1 }}
-                transition={{ duration: 0.5 }}
-                className='Promoters'
-            >
-                <div className="mb-4">
-                    <SearchFilter
-                        searchPlaceholder={t('adminPromoters.searchPromoters')}
-                        filters={filterConfig}
-                        onSearchChange={setSearchTerm}
-                        onFilterChange={setFilters}
-                    />
-                    {Promoters && (
-                        <p className="admin-users-count text-sm text-gray-600 mt-2">
-                            {paginatedPromoters.length > 0 ? (
-                                <>
-                                    {startIndex + 1}-{Math.min(endIndex, filteredPromoters.length)} {t('adminPromoters.of')} {filteredPromoters.length} {t('adminPromoters.promoters')}
-                                </>
-                            ) : (
-                                <>
-                                    0 {t('adminPromoters.of')} {filteredPromoters.length} {t('adminPromoters.promoters')}
-                                </>
-                            )}
-                        </p>
-                    )}
-                </div>
-
-                <div className="overflow-x-auto shadow-md sm:rounded-lg">
-                    <table className="admin-users-table">
-                        <thead className="admin-users-table__header">
-                            <tr>
-                                <th scope="col" className="px-6 py-3">{t("adminPromoters.username")}</th>
-                                <th scope="col" className="px-6 py-3">{t("adminPromoters.email")}</th>
-                                <th scope="col" className="px-6 py-3">{t("adminPromoters.premiumStatus") || "Premium Status"}</th>
-                                <th scope="col" className="px-6 py-3">{t("adminPromoters.watchingPlan")}</th>
-                                <th scope="col" className="px-6 py-3">{t("adminPromoters.downloadsPlan")}</th>
-                                <th scope="col" className="px-6 py-3">{t("adminPromoters.actions")}</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {paginatedPromoters.length > 0 ? (
-                                paginatedPromoters.map((ele, index) => {
-                                    return (
-                                        <tr key={ele._id || ele.id || index}>
-                                            <td data-label={t("adminPromoters.username")}>{ele.username}</td>
-                                            <td data-label={t("adminPromoters.email")}>{ele.email}</td>
-
-                                            <td data-label={t("adminPromoters.premiumStatus") || "Premium Status"}>
-                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${ele?.isBrimume ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
-                                                    {ele?.isBrimume ? 'true' : 'false'}
-                                                    </span>
-                                            </td>
-
-                                            <td data-label={t("adminPromoters.watchingPlan")}>
-                                                {ele?.watchingplan ? (
-                                                    <span className='text-green-700'>{t("adminPromoters.subscribed")}</span>
-                                                ) : (
-                                                    <span className='text-red-700'>{t("adminPromoters.unsubscribed")}</span>
-                                                )}
-                                            </td>
-
-                                            <td data-label={t("adminPromoters.downloadsPlan")}>
-                                                {ele?.Downloadsplan ? (
-                                                    <span className='text-green-700'>{t("adminPromoters.subscribed")}</span>
-                                                ) : (
-                                                    <span className='text-red-700'>{t("adminPromoters.unsubscribed")}</span>
-                                                )}
-                                            </td>
-
-                                            <td data-label={t("adminPromoters.actions")}>
-                                                <div className="action-buttons">
-                                                    <Link
-                                                        title={t("adminPromoters.viewEarnings")}
-                                                        to={`/Owner/Promoter/${ele?._id}`}
-                                                        className="text-indigo-600 hover:text-indigo-800 transition-colors"
-                                                    >
-                                                        <MdAttachMoney size={20} />
-                                                    </Link>
-                                                    <button
-                                                        onClick={() => setPremiumModal(ele)}
-                                                        className={`transition-colors ${ele.isBrimume ? 'text-yellow-600 hover:text-yellow-800' : 'text-purple-600 hover:text-purple-800'}`}
-                                                        title={ele.isBrimume ? (t("adminUsers.removePremium") || t("adminPromoters.removePremium")) : (t("adminUsers.makePremium") || t("adminPromoters.makePremium"))}
-                                                    >
-                                                        <FaCrown size={20} />
-                                                    </button>
-                                                    <button
-                                                        title={t("adminPromoters.delete")}
-                                                        onClick={() => setDeleteConfirm(ele)}
-                                                        className="text-red-600 hover:text-red-800 transition-colors"
-                                                    >
-                                                        <MdDelete size={20} />
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    )
-                                })) : (
-                                <tr>
-                                    <td colSpan="5" className="text-center py-8 text-gray-500">
-                                        {t('adminPromoters.noPromotersFound')}
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* Pagination */}
-                <Pagination
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    onPageChange={setCurrentPage}
-                    showCount={true}
-                    startIndex={startIndex}
-                    endIndex={Math.min(endIndex, filteredPromoters.length)}
-                    totalItems={filteredPromoters.length}
-                    itemsLabel={t('adminPromoters.promoters')}
-                />
-            </motion.div>
-            </div>
-
-            {/* Delete Confirmation Modal */}
-            <AnimatePresence>
-                {deleteConfirm && (
-                    <motion.div
-                        className="admin-delete-modal-backdrop"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={() => !isDeleting && setDeleteConfirm(null)}
-                    >
-                        <motion.div
-                            className="admin-delete-modal"
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.9, opacity: 0 }}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <h3>{t("adminPromoters.deletePromoter")}</h3>
-                            <p>{t("adminPromoters.deletePromoterConfirm") || `Are you sure you want to delete ${deleteConfirm.username || deleteConfirm.email}?`}</p>
-                            <p className="admin-delete-modal__warning">{t("adminPromoters.deletePromoterWarning") || "This action cannot be undone."}</p>
-                            <div className="admin-delete-modal__actions">
-                                <button
-                                    onClick={() => setDeleteConfirm(null)}
-                                    disabled={isDeleting}
-                                    className="admin-delete-modal__btn admin-delete-modal__btn--cancel"
-                                >
-                                    {t("adminUsers.cancel")}
-                                </button>
-                                <button
-                                    onClick={handleDeletePromoter}
-                                    disabled={isDeleting}
-                                    className="admin-delete-modal__btn admin-delete-modal__btn--delete"
-                                >
-                                    {isDeleting ? t("adminUsers.deleting") || "Deleting..." : t("adminUsers.delete")}
-                                </button>
-                            </div>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-
-            {/* Premium Modal */}
-            <AnimatePresence>
-                {premiumModal && (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6"
-                        >
-                            <div className="flex justify-between items-center border-b pb-4 mb-4">
-                                <h3 className="text-xl font-bold text-gray-900">
-                                    {premiumModal.isBrimume ? (t("adminUsers.removePremium") || t("adminPromoters.removePremium")) : (t("adminUsers.makePremium") || t("adminPromoters.makePremium"))}
-                                </h3>
-                                <button
-                                    onClick={() => {
-                                        setPremiumModal(null);
-                                        premiumFormik.resetForm();
-                                    }}
-                                    className="text-gray-500 hover:text-gray-700"
-                                >
-                                    <MdClose size={24} />
-                                </button>
-                            </div>
-                            <div className="mb-4">
-                                <p className="text-gray-600 mb-4">
-                                    {t("adminPromoters.promoter") || t("adminUsers.user")}: <strong>{premiumModal.username}</strong> ({premiumModal.email})
-                                </p>
-                                {premiumModal.isBrimume && premiumModal.premiumExpiration && (
-                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-                                        <p className="text-sm text-yellow-800">
-                                            {t("adminUsers.currentPremiumExpires") || t("adminPromoters.currentPremiumExpires")}: <strong>{new Date(premiumModal.premiumExpiration).toLocaleDateString()}</strong>
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
-                            {premiumModal.isBrimume ? (
-                                <div>
-                                    <p className="text-gray-600 mb-4">{t("adminUsers.removePremiumConfirm") || t("adminPromoters.removePremiumConfirm")}</p>
-                                    <div className="flex gap-3">
-                                        <button
-                                            onClick={() => {
-                                                setPremiumModal(null);
-                                                premiumFormik.resetForm();
-                                            }}
-                                            className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors"
-                                        >
-                                            {t("adminUsers.cancel") || t("adminPromoters.cancel")}
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                const userId = premiumModal?._id || premiumModal?.id;
-                                                if (userId) {
-                                                    handleTogglePremium(String(userId), premiumModal.isBrimume);
-                                                }
-                                            }}
-                                            className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                                        >
-                                            {t("adminUsers.removePremium") || t("adminPromoters.removePremium")}
-                                        </button>
-                                    </div>
-                                </div>
-                            ) : (
-                                <form onSubmit={premiumFormik.handleSubmit}>
-                                    <div className="mb-4">
-                                        <label htmlFor="expirationDate" className="block mb-2 text-sm font-medium text-gray-900">
-                                            {t("adminUsers.premiumExpirationDate") || t("adminPromoters.premiumExpirationDate")}
-                                        </label>
-                                        <input
-                                            type="datetime-local"
-                                            id="expirationDate"
-                                            name="expirationDate"
-                                            value={premiumFormik.values.expirationDate}
-                                            onChange={premiumFormik.handleChange}
-                                            onBlur={premiumFormik.handleBlur}
-                                            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-indigo-600 focus:border-indigo-600 block w-full p-2.5"
-                                        />
-                                        {premiumFormik.touched.expirationDate && premiumFormik.errors.expirationDate && (
-                                            <p className="mt-1 text-sm text-red-600">{premiumFormik.errors.expirationDate}</p>
-                                        )}
-                                    </div>
-                                    <div className="flex gap-3">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setPremiumModal(null);
-                                                premiumFormik.resetForm();
-                                            }}
-                                            className="flex-1 px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors"
-                                        >
-                                            {t("adminUsers.cancel") || t("adminPromoters.cancel")}
-                                        </button>
-                                        <button
-                                            type="submit"
-                                            className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
-                                        >
-                                            {t("adminUsers.makePremium") || t("adminPromoters.makePremium")}
-                                        </button>
-                                    </div>
-                                </form>
-                            )}
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
-        </div>
-    )
+        <AdminPage
+            icon={FaBullhorn}
+            title={t('staffPromoters.title')}
+            subtitle={t('staffPromoters.subtitle')}
+        >
+            <FilterBar
+                fields={filterFields}
+                values={list.filters}
+                onChange={list.setFilter}
+                onReset={list.resetFilters}
+            />
+            <AdminTable
+                title={t('staffPromoters.title')}
+                columns={columns}
+                rows={list.rows}
+                rowKey="userId"
+                loading={list.isLoading}
+                error={list.error}
+                onRetry={list.refetch}
+                meta={list.meta}
+                onPageChange={list.setPage}
+                onRowClick={(row) => navigate(`/Owner/Promoter/${row.userId}`)}
+            />
+        </AdminPage>
+    );
 }

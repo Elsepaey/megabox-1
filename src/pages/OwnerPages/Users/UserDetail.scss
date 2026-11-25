@@ -1,0 +1,98 @@
+@use "../../../helpers/_variables.scss" as vars;
+
+.user-detail-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.user-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.user-storage-bars {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.user-storage-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 1rem;
+    border: 1px solid vars.$gray-200;
+    border-radius: 0.75rem;
+    background: vars.$gray-50;
+
+    &__header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 0.5rem;
+        font-size: vars.$text-sm;
+        font-weight: 600;
+        color: vars.$BaseColor;
+    }
+
+    &__track {
+        height: 0.55rem;
+        width: 100%;
+        border-radius: 999px;
+        background: vars.$gray-200;
+        overflow: hidden;
+    }
+
+    &__fill {
+        height: 100%;
+        border-radius: 999px;
+        background: vars.$Secondcolor;
+        transition: width 0.25s ease;
+
+        &--warn {
+            background: #d97706;
+        }
+
+        &--danger {
+            background: #dc2626;
+        }
+    }
+
+    &__meta {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.5rem;
+        font-size: vars.$text-xs;
+        color: vars.$gray-500;
+    }
+}
+
+.user-recalc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+}
+
+.dark {
+    .user-storage-bar {
+        background: #0f172a;
+        border-color: rgba(99, 102, 241, 0.25);
+
+        &__header {
+            color: #f1f5f9;
+        }
+
+        &__track {
+            background: #334155;
+        }
+
+        &__meta {
+            color: #94a3b8;
+        }
+    }
+}

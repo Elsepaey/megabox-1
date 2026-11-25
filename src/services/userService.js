@@ -19,7 +19,7 @@ export const userService = {
 
     updateUsername: async (newUsername, token) => {
         try {
-            const response = await api.patch('/user/updateUsername',
+            const response = await api.patch('/users/profile',
                 { username: newUsername },
                 {
                     headers: {
@@ -36,8 +36,8 @@ export const userService = {
     updateProfileImage: async (imageFile, token) => {
         try {
             const formData = new FormData();
-            formData.append('image', imageFile);
-            const response = await api.patch('/user/updateimage',
+            formData.append('file', imageFile);
+            const response = await api.patch('/users/profile/image',
                 formData,
                 {
                     headers: {
@@ -52,9 +52,10 @@ export const userService = {
         }
     },
 
-    deleteProfileImage: async (token) => {
+    getSharedFoldersWithFiles: async (token, { page = 1, limit = 50 } = {}) => {
         try {
-            const response = await api.delete('/user/deleteimage', {
+            const response = await api.get('/shares/my-shares', {
+                params: { page, limit },
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -65,66 +66,17 @@ export const userService = {
         }
     },
 
-    // Subscribe to premium
-    subscribeToPremium: async (file, token) => {
-        try {
-            const formData = new FormData();
-            formData.append('file', file);
-            const response = await api.patch('/user/subscribeToPremium', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
-    },
-
-    // Get shared folders with files
-    getSharedFoldersWithFiles: async (token) => {
-        try {
-            const response = await api.get('/user/getSharedFoldersWithFiles', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
-    },
-
-    // Archive folder
     archiveFolder: async (folderId, token) => {
         try {
-            // Use the same createArchive endpoint as files
             return await fileService.createArchive([], [folderId], token);
         } catch (error) {
             throw error.response?.data || error.message;
         }
     },
 
-    // Unarchive folder - use removeFromArchive endpoint
-    // Backend expects Archive ID in URL, not Folder ID
     unarchiveFolder: async (folderId, token) => {
         try {
-            // Use the same removeFromArchive endpoint as files
-            // It will automatically find the archive containing this folder
-            return await fileService.removeFromArchive(null, [], [folderId], token);
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
-    },
-
-    // Create folder
-    createFolder: async (name, parentFolder, token) => {
-        try {
-            const response = await api.post('/user/createFolder', {
-                name,
-                parentFolder
-            }, {
+            const response = await api.delete(`/archives/folder/${folderId}`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -135,10 +87,12 @@ export const userService = {
         }
     },
 
-    // Get user folders
-    getUserFolders: async (token) => {
+    createFolder: async (name, parentFolder, token, channelId) => {
         try {
-            const response = await api.get('/user/getUserFolders', {
+            const body = { name };
+            if (parentFolder) body.parentFolderId = parentFolder;
+            if (channelId) body.channelId = channelId;
+            const response = await api.post('/folders', body, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -149,50 +103,9 @@ export const userService = {
         }
     },
 
-    /**
-     * Create file in folder
-     * @deprecated Use fileService.uploadFile(file, token, { folderId }) instead.
-     * This method uses legacy direct FormData upload. The new unified system
-     * supports chunked R2 uploads and TUS video uploads with pause/resume.
-     */
-    createFileInFolder: async (folderId, file, token) => {
-        try {
-            const formData = new FormData();
-            formData.append('file', file);
-            const response = await api.post(`/user/createFile/${folderId}`, formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
-    },
-
-    // Get folder files
-    getFolderFiles: async (folderId, type, token) => {
-        try {
-            const config = {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            };
-            if (type) {
-                config.params = { type };
-            }
-            const response = await api.get(`/user/getFolderFiles/${folderId}`, config);
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
-    },
-
-    // Delete folder
     deleteFolder: async (folderId, token) => {
         try {
-            const response = await api.delete(`/user/deleteFolder/${folderId}`, {
+            const response = await api.delete(`/folders/${folderId}`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
@@ -203,10 +116,9 @@ export const userService = {
         }
     },
 
-    // Update folder name
     updateFolderName: async (folderId, name, token) => {
         try {
-            const response = await api.patch(`/user/updateFolderName/${folderId}`, {
+            const response = await api.patch(`/folders/${folderId}`, {
                 name
             }, {
                 headers: {
@@ -219,69 +131,71 @@ export const userService = {
         }
     },
 
-    // Generate folder share link
-    generateFolderShareLink: async (folderId, token) => {
+    generateFolderShareLink: async (folderId, token, sourceType = 'normal') => {
         try {
-            const response = await api.post('/user/generateFolderShareLink', {
-                folderId
+            const response = await api.post('/shares', {
+                sourceType,
+                items: [{ itemId: folderId, itemType: 'folder' }]
             }, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
             });
-            // Show success toast if message indicates success
-            if (response.data?.message && (response.data.message.includes('نجاح') || response.data.message.includes('success') || response.data.shareUrl || response.data.shareLink)) {
-                toast.success(response.data.message || "Folder share link generated successfully", ToastOptions("success"));
+            const shareUrl = response.data?.branchUrl || response.data?.shareUrl || response.data?.shareLink || '';
+            if (response.data?.message || shareUrl) {
+                toast.success(response.data?.message || "Folder share link generated successfully", ToastOptions("success"));
             }
-            return response.data;
+            return { ...response.data, shareUrl, shareLink: shareUrl };
         } catch (error) {
             toast.error(error.response?.data?.message || "Failed to generate folder share link", ToastOptions("error"));
             throw error.response?.data || error.message;
         }
     },
 
-    // Disable folder share
-    disableFolderShare: async (folderId, token) => {
+    disableFolderShare: async (shareId, token) => {
         try {
-            const { data } = await api.patch(`/user/disableFolderShare/${folderId}`, {}, {
+            const { data } = await api.delete(`/shares/${shareId}`, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
             });
-            toast.success("Folder sharing disabled successfully", ToastOptions("success"));
+            toast.success(data?.message || "Share disabled successfully", ToastOptions("success"));
             return data;
         } catch (error) {
-            toast.error(error.response?.data?.message || "Failed to disable folder sharing", ToastOptions("error"));
+            toast.error(error.response?.data?.message || "Failed to disable share", ToastOptions("error"));
             throw error.response?.data || error.message;
         }
     },
 
-    // Generate multi share link
-    generateMultiShareLink: async (folderIds, fileIds, token) => {
+    generateMultiShareLink: async (folderIds, fileIds, token, sourceType = 'normal') => {
         try {
-            const response = await api.post('/user/generateMultiShareLink', {
-                folderIds,
-                fileIds
+            const items = [
+                ...(folderIds || []).map(id => ({ itemId: id, itemType: 'folder' })),
+                ...(fileIds || []).map(id => ({ itemId: id, itemType: 'file' })),
+            ];
+            const response = await api.post('/shares', {
+                sourceType,
+                items
             }, {
                 headers: {
                     Authorization: `Bearer ${token}`
                 }
             });
-            return response.data;
+            const shareUrl = response.data?.branchUrl || response.data?.shareUrl || response.data?.shareLink || '';
+            return { ...response.data, shareUrl, shareLink: shareUrl };
         } catch (error) {
             throw error.response?.data || error.message;
         }
     },
 
-    // Get shared items
-    getSharedItems: async (folderIds, fileIds, sharedBy) => {
+    requestAccountDeletion: async (_data, token) => {
         try {
-            const response = await api.get('/auth/getSharedItems', {
-                params: {
-                    folder_ids: folderIds,
-                    file_ids: fileIds,
-                    shared_by: sharedBy
-                }
+            const headers = {};
+            if (token) {
+                headers.Authorization = `Bearer ${token}`;
+            }
+            const response = await api.patch('/users/close-account', {}, {
+                headers
             });
             return response.data;
         } catch (error) {
@@ -289,16 +203,29 @@ export const userService = {
         }
     },
 
-    // Request account deletion
-    requestAccountDeletion: async (data, token) => {
+    getReferralStats: async ({ page = 1, limit = 20 } = {}, token) => {
         try {
             const headers = {};
-            // Only add Authorization header if token exists
             if (token) {
                 headers.Authorization = `Bearer ${token}`;
             }
+            const response = await api.get('/users/referrals', {
+                params: { page, limit },
+                headers
+            });
+            return response.data;
+        } catch (error) {
+            throw error.response?.data || error.message;
+        }
+    },
 
-            const response = await api.post('/user/requestAccountDeletion', data, {
+    deleteProfileImage: async (token) => {
+        try {
+            const headers = {};
+            if (token) {
+                headers.Authorization = `Bearer ${token}`;
+            }
+            const response = await api.delete('/users/profile/image', {
                 headers
             });
             return response.data;

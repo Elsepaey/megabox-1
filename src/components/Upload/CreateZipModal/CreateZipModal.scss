@@ -1,0 +1,284 @@
+.CreateZipModal_backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 99999;
+    padding: 1rem;
+}
+
+.CreateZipModal_modal {
+    position: relative;
+    width: 100%;
+    max-width: 560px;
+    max-height: 88vh;
+    background: var(--bg-card, #ffffff);
+    color: var(--text-primary, #1e293b);
+    border-radius: 16px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border-color, rgba(99, 102, 241, 0.18));
+}
+
+.CreateZipModal_header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.25rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.CreateZipModal_title_wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.CreateZipModal_icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(79, 70, 229, 0.12);
+    color: #4f46e5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.CreateZipModal_title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.CreateZipModal_subtitle {
+    font-size: 0.8125rem;
+    color: var(--text-secondary, #64748b);
+    margin: 0.125rem 0 0;
+}
+
+.CreateZipModal_close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary, #64748b);
+    cursor: pointer;
+    padding: 0.375rem;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+        background: rgba(148, 163, 184, 0.15);
+        color: var(--text-primary, #0f172a);
+    }
+}
+
+.CreateZipModal_body {
+    padding: 1rem 1.5rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex: 1;
+}
+
+.CreateZipModal_field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+
+    label {
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--text-primary, #334155);
+    }
+}
+
+.CreateZipModal_input {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border-radius: 10px;
+    border: 1px solid var(--border-color, #cbd5e1);
+    background: var(--bg-input, #f8fafc);
+    color: var(--text-primary, #0f172a);
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+    &:focus {
+        border-color: #6366f1;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+}
+
+.CreateZipModal_toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.CreateZipModal_search_wrap {
+    position: relative;
+    flex: 1;
+    min-width: 180px;
+}
+
+.CreateZipModal_search_icon {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    inset-inline-start: 0.75rem;
+    color: var(--text-secondary, #94a3b8);
+    pointer-events: none;
+}
+
+.CreateZipModal_search_input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    padding-inline-start: 2.25rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #cbd5e1);
+    background: var(--bg-input, #f8fafc);
+    color: var(--text-primary, #0f172a);
+    font-size: 0.8125rem;
+    outline: none;
+
+    &:focus {
+        border-color: #6366f1;
+    }
+}
+
+.CreateZipModal_count {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #4f46e5;
+    white-space: nowrap;
+}
+
+.CreateZipModal_list {
+    border: 1px solid var(--border-color, #e2e8f0);
+    border-radius: 10px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: var(--bg-subtle, #f8fafc);
+}
+
+.CreateZipModal_item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+    transition: background-color 0.15s ease;
+
+    &:last-child {
+        border-bottom: none;
+    }
+
+    &:hover {
+        background: rgba(99, 102, 241, 0.06);
+    }
+
+    &.selected {
+        background: rgba(99, 102, 241, 0.12);
+    }
+
+    input[type='checkbox'] {
+        width: 16px;
+        height: 16px;
+        accent-color: #4f46e5;
+        cursor: pointer;
+        flex-shrink: 0;
+    }
+}
+
+.CreateZipModal_item_icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    color: #4f46e5;
+}
+
+.CreateZipModal_item_info {
+    flex: 1;
+    min-width: 0;
+}
+
+.CreateZipModal_item_name {
+    font-size: 0.875rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.CreateZipModal_item_meta {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #64748b);
+}
+
+.CreateZipModal_empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--text-secondary, #64748b);
+    font-size: 0.875rem;
+}
+
+.CreateZipModal_footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.CreateZipModal_btn_cancel {
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #cbd5e1);
+    background: transparent;
+    color: var(--text-primary, #334155);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+
+    &:hover {
+        background: rgba(148, 163, 184, 0.12);
+    }
+}
+
+.CreateZipModal_btn_submit {
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    border: none;
+    background: #4f46e5;
+    color: #ffffff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background-color 0.15s ease, opacity 0.15s ease;
+
+    &:hover:not(:disabled) {
+        background: #4338ca;
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+    }
+}

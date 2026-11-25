@@ -3,6 +3,26 @@ import { useCookies } from 'react-cookie';
 import enTranslations from '../locales/en.json';
 import arTranslations from '../locales/ar.json';
 
+// Staff dashboard strings live in src/locales/admin/<area>.<lang>.json, each
+// holding its own top-level namespaces, merged over the base dictionaries.
+const adminLocaleModules = import.meta.glob('../locales/admin/*.json', { eager: true, import: 'default' });
+
+function mergeAdminLocales(base, lang) {
+  const merged = { ...base };
+  Object.entries(adminLocaleModules).forEach(([path, dict]) => {
+    if (!path.endsWith(`.${lang}.json`)) return;
+    Object.entries(dict).forEach(([ns, value]) => {
+      merged[ns] = { ...(merged[ns] || {}), ...value };
+    });
+  });
+  return merged;
+}
+
+const dictionaries = {
+  en: mergeAdminLocales(enTranslations, 'en'),
+  ar: mergeAdminLocales(arTranslations, 'ar'),
+};
+
 const LanguageContext = createContext();
 
 export const LanguageProvider = ({ children }) => {
@@ -30,7 +50,7 @@ export const LanguageProvider = ({ children }) => {
 
   const t = (key, params = {}) => {
     const keys = key.split('.');
-    const translations = language === 'ar' ? arTranslations : enTranslations;
+    const translations = language === 'ar' ? dictionaries.ar : dictionaries.en;
     let value = translations;
 
     for (const k of keys) {
@@ -56,7 +76,6 @@ export const LanguageProvider = ({ children }) => {
         const lastKey = keyParts[keyParts.length - 1];
         const pluralLastKey = lastKey + 'Plural';
         const pluralKeyParts = [...keyParts.slice(0, -1), pluralLastKey];
-        const pluralKey = pluralKeyParts.join('.');
         
         // Try to get the plural value
         let pluralValue = translations;

@@ -94,7 +94,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const fcmToken = await getFCMToken();
       if (fcmToken && u?._id) {
-        await notificationService.saveFcmToken(u._id, fcmToken);
+        await notificationService.saveFcmToken(fcmToken);
       }
     } catch {
       // FCM is optional.
@@ -289,24 +289,17 @@ export const AuthProvider = ({ children }) => {
     }
   }
 
-  // Centralized logout function — server first (best-effort), then local.
-  const logout = async () => {
-    const token = cookies.MegaBox;
-
-    // FCM token cleanup (best-effort)
-    if (token) {
+  // Centralized logout function. Best-effort server revocation via
+  // POST /api/auth/logout before clearing local auth state.
+  const logout = async (options = {}) => {
+    const refreshToken = authStorage.getRefreshToken();
+    const allDevices = Boolean(options?.allDevices);
+    if (refreshToken) {
       try {
-        await notificationService.deleteFcmToken(token);
-      } catch (e) {
-        console.warn('Failed to delete FCM token:', e);
+        await authService.logout(refreshToken, allDevices);
+      } catch {
+        // Best-effort: always clear local session even if the server call fails.
       }
-    }
-
-    // Server-side logout — invalidates the refresh token. Best-effort.
-    try {
-      await authService.logout();
-    } catch (e) {
-      console.warn('Server logout failed:', e);
     }
 
     queryClient.clear();
@@ -323,7 +316,7 @@ export const AuthProvider = ({ children }) => {
     // Belt-and-braces fallback for stale cookies on different paths/domains.
     document.cookie = "MegaBox=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
     document.cookie = "MegaBox=; path=/; domain=" + window.location.hostname + "; expires=Thu, 01 Jan 1970 00:00:00 GMT;";
-  }
+  };
 
   // Wire the apiConfig refresh-failure handler so a failed /auth/refresh wipes
   // local auth state (the user lands on /login next render via protectors).
@@ -363,6 +356,7 @@ export const AuthProvider = ({ children }) => {
       DeleteFile,
       ChangeFileName,
       signupWithRef,
+      persistAuthSuccess,
       logout
     }}>
       {children}

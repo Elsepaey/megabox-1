@@ -1,692 +1,410 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { useQuery, useQueryClient } from 'react-query';
-import { useCookies } from 'react-cookie';
-import { motion, AnimatePresence } from 'framer-motion'; // eslint-disable-line no-unused-vars
-import { useNavigate } from 'react-router-dom';
-import { adminService } from '../../../services/api';
-import { useLanguage } from '../../../context/LanguageContext';
-import SearchFilter from '../../../components/SearchFilter/SearchFilter';
-import Pagination from '../../../components/Pagination/Pagination';
-import { FaMoneyBillWave, FaCheck, FaTimes, FaEye, FaCreditCard } from 'react-icons/fa';
-import { HiArrowRight, HiArrowLeft } from 'react-icons/hi2';
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
+import { FaMoneyBillWave } from 'react-icons/fa';
+import { useLanguage } from '../../../context/LanguageContext';
 import { ToastOptions } from '../../../helpers/ToastOptions';
-import { format } from 'date-fns';
-import './Withdrawals.scss';
+import financeAdmin from '../../../services/admin/financeAdmin';
+import { apiErrorStatus } from '../../../services/admin/adminApi';
+import {
+    AdminModal,
+    AdminPage,
+    AdminTable,
+    AdminTabs,
+    DetailList,
+    ReasonModal,
+    StatusBadge,
+} from '../_shared/AdminUI';
+import useAdminList from '../_shared/useAdminList';
+import useStaffRole from '../_shared/useStaffRole';
+import { formatDate, formatNumber, shortId } from '../_shared/formatters';
+
+const STATUS_TONE = {
+    pending: 'warning',
+    approved: 'info',
+    completed: 'success',
+    rejected: 'danger',
+};
+
+function methodNameOf(row, language) {
+    const info = row?.paymentMethodInfo;
+    if (info && typeof info === 'object') {
+        return (language === 'ar' ? info.name_ar : info.name_en) || info.name_en || row?.paymentMethod || '—';
+    }
+    return row?.paymentMethod || '—';
+}
+
+function formatPaymentDetails(row, language) {
+    const map = row?.paymentDetailsMap;
+    if (map && typeof map === 'object' && !Array.isArray(map)) {
+        const fieldLabels = new Map(
+            (row?.paymentMethodInfo?.fields || []).map((f) => [
+                f.key,
+                (language === 'ar' ? f.label_ar : f.label_en) || f.key,
+            ]),
+        );
+        const entries = Object.entries(map).filter(
+            ([, v]) => v !== undefined && v !== null && v !== '',
+        );
+        if (entries.length > 0) {
+            return entries.map(([k, v]) => `${fieldLabels.get(k) || k}: ${String(v)}`).join(' · ');
+        }
+    }
+    const details = row?.paymentDetails;
+    if (!details) return '—';
+    if (typeof details === 'string') return details;
+    if (typeof details === 'object') {
+        const entries = Object.entries(details).filter(
+            ([, v]) => v !== undefined && v !== null && v !== '',
+        );
+        if (entries.length === 0) return '—';
+        return entries.map(([k, v]) => `${k}: ${String(v)}`).join(' · ');
+    }
+    return String(details);
+}
+function userDisplay(row) {
+    const u = row?.userId;
+    if (u && typeof u === 'object') {
+        return u.username || u.email || shortId(u._id);
+    }
+    return shortId(u);
+}
+
+function userIdOf(row) {
+    const u = row?.userId;
+    if (u && typeof u === 'object') return u._id;
+    return u;
+}
 
 export default function Withdrawals() {
     const { t, language } = useLanguage();
-    const navigate = useNavigate();
-    const [cookies] = useCookies(['MegaBox']);
-    const token = cookies.MegaBox;
-    const [searchTerm, setSearchTerm] = useState('');
-    const [filters, setFilters] = useState({});
-    const queryClient = useQueryClient();
-    const [processingWithdrawals, setProcessingWithdrawals] = useState(new Set());
-    const [selectedWithdrawal, setSelectedWithdrawal] = useState(null);
-    const [rejectionModal, setRejectionModal] = useState({ isOpen: false, withdrawalId: null, reason: '' });
-    // Store rejection reasons locally since backend doesn't return them in getAllWithdrawals
-    const [rejectionReasons, setRejectionReasons] = useState(new Map());
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 10;
-    const [showApprovedOnly, setShowApprovedOnly] = useState(false);
-    const [viewMode, setViewMode] = useState('all'); // 'all', 'approved'
+    const { userId: currentStaffId } = useStaffRole();
+    const [actionModal, setActionModal] = useState(null); // { row, nextStatus }
+    const [detailRow, setDetailRow] = useState(null);
 
-    // Fetch all withdrawals
-    const { data: withdrawalsData, isLoading: withdrawalsLoading } = useQuery(
-        ['allWithdrawals'],
-        () => adminService.getAllWithdrawals(token),
-        { enabled: !!token }
-    );
+    const list = useAdminList('staff:withdrawals', financeAdmin.listWithdrawals, {
+        initialFilters: { status: '' },
+        limit: 20,
+    });
 
-    // Fetch approved withdrawals
-    const { data: approvedWithdrawalsData, isLoading: approvedLoading } = useQuery(
-        ['approvedWithdrawals'],
-        () => adminService.getApprovedWithdrawals(token),
-        { enabled: !!token && (showApprovedOnly || viewMode === 'approved') }
-    );
-
-    // Use appropriate withdrawals based on view mode
-    const withdrawalsToFilter = useMemo(() => {
-        // Get base withdrawals data
-        let baseWithdrawals = [];
-        
-        if (viewMode === 'approved' || showApprovedOnly) {
-            baseWithdrawals = approvedWithdrawalsData?.withdrawals || approvedWithdrawalsData || [];
-        } else {
-            // For 'all' mode, show only pending and rejected (exclude approved)
-            const allWithdrawals = withdrawalsData?.withdrawals || withdrawalsData || [];
-            // Handle case where API returns array directly
-            const withdrawalsArray = Array.isArray(allWithdrawals) 
-                ? allWithdrawals 
-                : (allWithdrawals.withdrawals || []);
-            // Filter to show only pending and rejected
-            baseWithdrawals = withdrawalsArray.filter(w => 
-                w.status === 'pending' || w.status === 'rejected'
-            );
-        }
-
-        return baseWithdrawals;
-    }, [viewMode, showApprovedOnly, approvedWithdrawalsData, withdrawalsData]);
-
-    // Filter withdrawals based on search and filters
-    const filteredWithdrawals = useMemo(() => {
-        if (!withdrawalsToFilter || withdrawalsToFilter.length === 0) return [];
-
-        // Handle case where API returns array directly
-        const withdrawalsArray = Array.isArray(withdrawalsToFilter) 
-            ? withdrawalsToFilter 
-            : (withdrawalsToFilter.withdrawals || []);
-        
-        // Merge rejection reasons from local storage into withdrawals
-        const withdrawalsWithReasons = withdrawalsArray.map(withdrawal => {
-            if (withdrawal.status === 'rejected') {
-                const withdrawalId = withdrawal._id || withdrawal.id;
-                const storedReason = rejectionReasons.get(withdrawalId);
-                if (storedReason && !withdrawal.reason) {
-                    return { ...withdrawal, reason: storedReason };
-                }
-            }
-            return withdrawal;
-        });
-
-        return withdrawalsWithReasons.filter((withdrawal) => {
-            // Search filter
-            if (searchTerm) {
-                const userInfo = typeof withdrawal.userId === 'object' && withdrawal.userId !== null
-                    ? `${withdrawal.userId.username || ''} ${withdrawal.userId.email || ''} ${withdrawal.userId._id || ''}`
-                    : `${withdrawal.userId || ''} ${withdrawal.username || ''}`;
-
-                const searchLower = searchTerm.toLowerCase();
-                const paymentMethodStr = typeof withdrawal.paymentMethod === 'object' && withdrawal.paymentMethod !== null
-                    ? (withdrawal.paymentMethod.name || withdrawal.paymentMethod.type || withdrawal.paymentMethod.walletId || '').toLowerCase()
-                    : (withdrawal.paymentMethod || '').toLowerCase();
-                if (!userInfo.toLowerCase().includes(searchLower) &&
-                    !withdrawal.amount?.toString().toLowerCase().includes(searchLower) &&
-                    !paymentMethodStr.includes(searchLower)) {
-                    return false;
-                }
-            }
-
-            // Status filter
-            if (filters.status && withdrawal.status !== filters.status) {
-                return false;
-            }
-
-            // Payment method filter
-            if (filters.paymentMethod) {
-                const withdrawalPaymentMethod = typeof withdrawal.paymentMethod === 'object' && withdrawal.paymentMethod !== null
-                    ? (withdrawal.paymentMethod.name || withdrawal.paymentMethod.type || withdrawal.paymentMethod.walletId || '')
-                    : (withdrawal.paymentMethod || '');
-                if (withdrawalPaymentMethod !== filters.paymentMethod) {
-                    return false;
-                }
-            }
-
-            return true;
-        });
-    }, [withdrawalsToFilter, searchTerm, filters, rejectionReasons]);
-
-    // Pagination logic
-    const totalPages = Math.ceil(filteredWithdrawals.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedWithdrawals = filteredWithdrawals.slice(startIndex, endIndex);
-
-    // Reset to page 1 when filters change
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm, filters]);
-
-    // Get unique payment methods for filter
-    const paymentMethods = useMemo(() => {
-        const withdrawalsArray = Array.isArray(withdrawalsToFilter) 
-            ? withdrawalsToFilter 
-            : (withdrawalsToFilter?.withdrawals || []);
-        if (!withdrawalsArray || withdrawalsArray.length === 0) return [];
-        const methods = new Set();
-        withdrawalsArray.forEach(w => {
-            if (w.paymentMethod) {
-                const methodValue = typeof w.paymentMethod === 'object' && w.paymentMethod !== null
-                    ? (w.paymentMethod.name || w.paymentMethod.type || w.paymentMethod.walletId || '')
-                    : (w.paymentMethod || '');
-                if (methodValue) methods.add(methodValue);
-            }
-        });
-        return Array.from(methods).map(method => ({
-            value: method,
-            label: method
-        }));
-    }, [withdrawalsToFilter]);
-
-    // Filter configuration
-    const filterConfig = [
-        {
-            key: 'status',
-            label: t('adminAnalytics.status'),
-            allLabel: t('searchFilter.all'),
-            options: [
-                { value: 'pending', label: t('adminAnalytics.pending') },
-                { value: 'approved', label: t('adminAnalytics.approved') },
-                { value: 'rejected', label: t('adminAnalytics.rejected') }
-            ]
-        },
-        ...(paymentMethods.length > 0 ? [{
-            key: 'paymentMethod',
-            label: t('adminAnalytics.paymentMethod'),
-            allLabel: t('searchFilter.all'),
-            options: paymentMethods
-        }] : [])
+    const tabs = [
+        { key: '', label: t('staffWithdrawals.statusAll') },
+        { key: 'pending', label: t('staffWithdrawals.statusPending') },
+        { key: 'approved', label: t('staffWithdrawals.statusApproved') },
+        { key: 'completed', label: t('staffWithdrawals.statusCompleted') },
+        { key: 'rejected', label: t('staffWithdrawals.statusRejected') },
     ];
 
-    // Handle approve withdrawal
-    const handleApprove = async (withdrawalId) => {
-        setProcessingWithdrawals(prev => new Set(prev).add(withdrawalId));
+    const statusLabel = (status) => {
+        const map = {
+            pending: t('staffWithdrawals.statusPending'),
+            approved: t('staffWithdrawals.statusApproved'),
+            completed: t('staffWithdrawals.statusCompleted'),
+            rejected: t('staffWithdrawals.statusRejected'),
+        };
+        return map[status] || status || '—';
+    };
+
+    const handleConfirmAction = async (reason) => {
+        if (!actionModal) return;
+        const { row, nextStatus } = actionModal;
+        const body =
+            nextStatus === 'rejected'
+                ? { status: 'rejected', rejectionReason: reason }
+                : { status: nextStatus };
+
         try {
-            await adminService.updateWithdrawalStatus(withdrawalId, 'approved', null, token);
-            toast.success(t('adminWithdrawals.approvedSuccess') || 'Withdrawal approved successfully', ToastOptions("success"));
-            queryClient.invalidateQueries(['allWithdrawals']);
-            queryClient.invalidateQueries(['approvedWithdrawals']);
-            // Optimistic update
-            queryClient.setQueryData(['allWithdrawals'], (oldData) => {
-                if (!oldData?.withdrawals) return oldData;
-                return {
-                    ...oldData,
-                    withdrawals: oldData.withdrawals.map(w => 
-                        (w._id === withdrawalId || w.id === withdrawalId) 
-                            ? { ...w, status: 'approved' }
-                            : w
-                    )
-                };
-            });
+            await financeAdmin.updateWithdrawalStatus(row._id, body);
+            const successKey =
+                nextStatus === 'approved'
+                    ? 'staffWithdrawals.approvedSuccess'
+                    : nextStatus === 'completed'
+                      ? 'staffWithdrawals.completedSuccess'
+                      : 'staffWithdrawals.rejectedSuccess';
+            toast.success(t(successKey), ToastOptions('success'));
+            setActionModal(null);
+            list.refetch();
         } catch (error) {
-            toast.error(error.response?.data?.message || t('adminWithdrawals.approveFailed') || 'Failed to approve withdrawal', ToastOptions("error"));
-        } finally {
-            setProcessingWithdrawals(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(withdrawalId);
-                return newSet;
-            });
+            if (apiErrorStatus(error) === 409) {
+                toast.info(t('staffCommon.conflictReload'), ToastOptions('info'));
+                setActionModal(null);
+                list.refetch();
+            }
         }
     };
 
-    // Open rejection modal
-    const openRejectionModal = (withdrawalId) => {
-        setRejectionModal({ isOpen: true, withdrawalId, reason: '' });
-    };
-
-    // Handle reject withdrawal with reason
-    const handleReject = async () => {
-        const { withdrawalId, reason } = rejectionModal;
-        if (!reason || reason.trim() === '') {
-            toast.error(t('adminWithdrawals.reasonRequired') || 'Please provide a reason for rejection', ToastOptions("error"));
-            return;
-        }
-
-        setProcessingWithdrawals(prev => new Set(prev).add(withdrawalId));
-        try {
-            const response = await adminService.updateWithdrawalStatus(withdrawalId, 'rejected', reason.trim(), token);
-            
-            // Check if response includes updated withdrawal with reason
-            const updatedWithdrawal = response?.withdrawal || response?.data?.withdrawal || response?.data;
-            
-            // Store the rejection reason locally (since backend doesn't return it in getAllWithdrawals)
-            const rejectionReason = updatedWithdrawal?.reason || 
-                                   updatedWithdrawal?.rejectionReason || 
-                                   reason.trim();
-            setRejectionReasons(prev => new Map(prev).set(withdrawalId, rejectionReason));
-            
-            toast.success(t('adminWithdrawals.rejectedSuccess') || 'Withdrawal rejected successfully', ToastOptions("success"));
-            
-            // Update query data optimistically with the reason
-            queryClient.setQueryData(['allWithdrawals'], (oldData) => {
-                if (!oldData?.withdrawals) return oldData;
-                return {
-                    ...oldData,
-                    withdrawals: oldData.withdrawals.map(w => {
-                        if (w._id === withdrawalId || w.id === withdrawalId) {
-                            return { ...w, status: 'rejected', reason: rejectionReason };
-                        }
-                        return w;
-                    })
-                };
-            });
-            
-            // Invalidate and refetch
-            queryClient.invalidateQueries(['allWithdrawals']);
-            queryClient.invalidateQueries(['approvedWithdrawals']);
-            
-            setRejectionModal({ isOpen: false, withdrawalId: null, reason: '' });
-        } catch (error) {
-            toast.error(error.response?.data?.message || t('adminWithdrawals.rejectFailed') || 'Failed to reject withdrawal', ToastOptions("error"));
-        } finally {
-            setProcessingWithdrawals(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(withdrawalId);
-                return newSet;
-            });
-        }
-    };
-
-    const currency = withdrawalsToFilter?.[0]?.currency || 
-                     (Array.isArray(withdrawalsToFilter) ? withdrawalsToFilter[0]?.currency : null) ||
-                     withdrawalsData?.withdrawals?.[0]?.currency || 'USD';
-
-    return (
-        <div className="admin-withdrawals-page">
-            <div className="admin-withdrawals-page__wrapper">
-                <div className="admin-withdrawals-header">
-                    <div className="admin-withdrawals-header__content">
-                        <button
-                            onClick={() => navigate('/Owner')}
-                            className="admin-withdrawals-header__back"
-                            title={t('adminWithdrawals.backToAnalytics')}
-                        >
-                            {language === 'ar' ? <HiArrowRight size={24} /> : <HiArrowLeft size={24} />}
-                        </button>
-                        <FaMoneyBillWave className="admin-withdrawals-header__icon" />
-                        <div className="admin-withdrawals-header__text">
-                            <h1 className="admin-withdrawals-header__title">{t('adminWithdrawals.title')}</h1>
-                            <p className="admin-withdrawals-header__subtitle">{t('adminWithdrawals.subtitle')}</p>
-                        </div>
-                        <button
-                            onClick={() => navigate('/Owner/PaymentServices')}
-                            className="admin-withdrawals-header__payment-services-btn"
-                            title={t('adminWithdrawals.managePaymentServices')}
-                        >
-                            <FaCreditCard />
-                            <span>{t('adminWithdrawals.managePaymentServices')}</span>
-                        </button>
-                    </div>
-                </div>
-
-                {withdrawalsLoading || (showApprovedOnly && approvedLoading) ? (
-                    <div className="admin-withdrawals-loading">
-                        <p>{t('adminWithdrawals.loading')}</p>
-                    </div>
-                ) : (withdrawalsToFilter && (Array.isArray(withdrawalsToFilter) ? withdrawalsToFilter.length > 0 : withdrawalsToFilter.withdrawals?.length > 0)) ? (
-                    <>
-                        <div className="admin-withdrawals-filters">
-                            <div className="admin-withdrawals-toggle">
-                                <button
-                                    className={`admin-withdrawals-toggle__btn ${viewMode === 'all' ? 'active' : ''}`}
-                                    onClick={() => {
-                                        setViewMode('all');
-                                        setShowApprovedOnly(false);
-                                    }}
-                                >
-                                    <span className="filter-title">
-                                        {t('adminWithdrawals.pendingAndRejected') || 'Pending & Rejected'}
-                                    </span>
-                                    <span className="filter-desc">
-                                        {t('adminWithdrawals.pendingAndRejectedDesc') || 'View pending and rejected withdrawal requests'}
-                                    </span>
-                                </button>
-                                <button
-                                    className={`admin-withdrawals-toggle__btn ${viewMode === 'approved' ? 'active' : ''}`}
-                                    onClick={() => {
-                                        setViewMode('approved');
-                                        setShowApprovedOnly(true);
-                                    }}
-                                >
-                                    <span className="filter-title">
-                                        {t('adminWithdrawals.approvedOnly') || 'Approved'}
-                                    </span>
-                                    <span className="filter-desc">
-                                        {t('adminWithdrawals.approvedOnlyDesc') || 'View approved withdrawals only'}
-                                    </span>
-                                </button>
-                            </div>
-                        </div>
-                        <SearchFilter
-                            searchPlaceholder={t('adminAnalytics.searchWithdrawals')}
-                            filters={filterConfig}
-                            onSearchChange={setSearchTerm}
-                            onFilterChange={setFilters}
-                        />
-
-                        <div className="admin-withdrawals-table-wrapper">
-                            <table className="admin-users-table">
-                                <thead className="admin-users-table__header">
-                                    <tr>
-                                        <th scope="col">{t('adminWithdrawals.user')}</th>
-                                        <th scope="col">{t('adminWithdrawals.amount')}</th>
-                                        <th scope="col">{t('adminWithdrawals.paymentMethod')}</th>
-                                        <th scope="col">{t('adminWithdrawals.status')}</th>
-                                        <th scope="col">{t('adminWithdrawals.date')}</th>
-                                        <th scope="col">{t('adminWithdrawals.actions')}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {paginatedWithdrawals.length > 0 ? (
-                                        paginatedWithdrawals.map((withdrawal, index) => (
-                                            <tr key={withdrawal._id || withdrawal.id || index}>
-                                                <td data-label={t('adminWithdrawals.user')}>
-                                                    {typeof withdrawal.userId === 'object' && withdrawal.userId !== null
-                                                        ? (withdrawal.userId.username || withdrawal.userId.email || withdrawal.userId._id || '-')
-                                                        : (withdrawal.userId || withdrawal.username || '-')
-                                                    }
-                                                </td>
-                                                <td data-label={t('adminWithdrawals.amount')}>
-                                                    {withdrawal.amount} {withdrawal.currency || currency}
-                                                </td>
-                                                <td data-label={t('adminWithdrawals.paymentMethod')}>
-                                                    {typeof withdrawal.paymentMethod === 'object' && withdrawal.paymentMethod !== null
-                                                        ? (withdrawal.paymentMethod.name || withdrawal.paymentMethod.type || withdrawal.paymentMethod.walletId || JSON.stringify(withdrawal.paymentMethod))
-                                                        : (withdrawal.paymentMethod || '-')
-                                                    }
-                                                </td>
-                                                <td data-label={t('adminWithdrawals.status')}>
-                                                    <span className={`status-badge status-${withdrawal.status || 'pending'}`}>
-                                                        {withdrawal.status === 'approved'
-                                                            ? t('adminWithdrawals.approved')
-                                                            : withdrawal.status === 'pending'
-                                                                ? t('adminWithdrawals.pending')
-                                                                : withdrawal.status === 'rejected'
-                                                                    ? t('adminWithdrawals.rejected')
-                                                                    : withdrawal.status || t('adminWithdrawals.pending')}
-                                                    </span>
-                                                </td>
-                                                <td data-label={t('adminWithdrawals.date')}>
-                                                    {withdrawal.createdAt
-                                                        ? new Date(withdrawal.createdAt).toLocaleDateString()
-                                                        : '-'}
-                                                </td>
-                                                <td data-label={t('adminWithdrawals.actions')}>
-                                                    <div className="action-buttons">
-                                                        <motion.button
-                                                            className="admin-withdrawals-actions__btn admin-withdrawals-actions__btn--view"
-                                                            onClick={() => {
-                                                                // Ensure withdrawal has reason from local storage if it's rejected
-                                                                const withdrawalId = withdrawal._id || withdrawal.id;
-                                                                if (withdrawal.status === 'rejected' && !withdrawal.reason) {
-                                                                    const storedReason = rejectionReasons.get(withdrawalId);
-                                                                    if (storedReason) {
-                                                                        setSelectedWithdrawal({ ...withdrawal, reason: storedReason });
-                                                                        return;
-                                                                    }
-                                                                }
-                                                                setSelectedWithdrawal(withdrawal);
-                                                            }}
-                                                            whileHover={{ scale: 1.05 }}
-                                                            whileTap={{ scale: 0.95 }}
-                                                            title={t('adminWithdrawals.viewDetails')}
-                                                        >
-                                                            <FaEye size={18} />
-                                                        </motion.button>
-                                                        {withdrawal.status === 'pending' ? (
-                                                            <>
-                                                                <motion.button
-                                                                    className="admin-withdrawals-actions__btn admin-withdrawals-actions__btn--approve"
-                                                                    onClick={() => handleApprove(withdrawal._id || withdrawal.id)}
-                                                                    disabled={processingWithdrawals.has(withdrawal._id || withdrawal.id)}
-                                                                    whileHover={{ scale: 1.05 }}
-                                                                    whileTap={{ scale: 0.95 }}
-                                                                    title={t('adminWithdrawals.approve')}
-                                                                >
-                                                                    <FaCheck size={18} />
-                                                                </motion.button>
-                                                                <motion.button
-                                                                    className="admin-withdrawals-actions__btn admin-withdrawals-actions__btn--reject"
-                                                                    onClick={() => openRejectionModal(withdrawal._id || withdrawal.id)}
-                                                                    disabled={processingWithdrawals.has(withdrawal._id || withdrawal.id)}
-                                                                    whileHover={{ scale: 1.05 }}
-                                                                    whileTap={{ scale: 0.95 }}
-                                                                    title={t('adminWithdrawals.reject')}
-                                                                >
-                                                                    <FaTimes size={18} />
-                                                                </motion.button>
-                                                            </>
-                                                        ) : null}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    ) : (
-                                        <tr>
-                                            <td colSpan="6" className="text-center py-8 text-gray-500">
-                                                {t('adminWithdrawals.noWithdrawalsFound')}
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Pagination */}
-                        {filteredWithdrawals.length > 0 && (
-                            <Pagination
-                                currentPage={currentPage}
-                                totalPages={totalPages}
-                                onPageChange={setCurrentPage}
-                                showCount={true}
-                                startIndex={startIndex}
-                                endIndex={Math.min(endIndex, filteredWithdrawals.length)}
-                                totalItems={filteredWithdrawals.length}
-                                itemsLabel={t('adminWithdrawals.withdrawals')}
-                            />
+    const columns = [
+        {
+            key: 'user',
+            header: t('staffCommon.user'),
+            render: (row) => {
+                const uid = userIdOf(row);
+                const email = row.userId && typeof row.userId === 'object' ? row.userId.email : null;
+                return (
+                    <div>
+                        {uid ? (
+                            <Link to={`/Owner/Users/${uid}`} style={{ fontWeight: 600 }}>
+                                {userDisplay(row)}
+                            </Link>
+                        ) : (
+                            '—'
                         )}
-                    </>
-                ) : (
-                    <div className="admin-withdrawals-empty">
-                        <p>{t('adminWithdrawals.noWithdrawals')}</p>
+                        {email && (
+                            <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>{email}</div>
+                        )}
                     </div>
-                )}
-            </div>
-
-            {/* Withdrawal Details Modal */}
-            {selectedWithdrawal && (
-                <div
-                    className="admin-withdrawal-modal-backdrop"
-                    onClick={() => setSelectedWithdrawal(null)}
-                >
-                    <div
-                        className="admin-withdrawal-modal"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                            <div className="admin-withdrawal-modal__header">
-                                <h2>{t('adminWithdrawals.withdrawalDetails')}</h2>
-                                <button
-                                    onClick={() => setSelectedWithdrawal(null)}
-                                    className="admin-withdrawal-modal__close"
-                                    aria-label="Close"
-                                >
-                                    <FaTimes />
-                                </button>
-                            </div>
-
-                            <div className="admin-withdrawal-modal__body">
-                                <div className="admin-withdrawal-modal__row">
-                                    <strong>{t('adminWithdrawals.user')}:</strong>
-                                    <span>
-                                        {typeof selectedWithdrawal.userId === 'object' && selectedWithdrawal.userId !== null
-                                            ? (selectedWithdrawal.userId.username || selectedWithdrawal.userId.email || selectedWithdrawal.userId._id || '-')
-                                            : (selectedWithdrawal.userId || selectedWithdrawal.username || '-')
-                                        }
-                                    </span>
-                                </div>
-
-                                <div className="admin-withdrawal-modal__row">
-                                    <strong>{t('adminWithdrawals.amount')}:</strong>
-                                    <span>
-                                        {typeof selectedWithdrawal.amount === 'object' && selectedWithdrawal.amount !== null
-                                            ? JSON.stringify(selectedWithdrawal.amount)
-                                            : String(selectedWithdrawal.amount || '-')
-                                        } {typeof selectedWithdrawal.currency === 'object' && selectedWithdrawal.currency !== null
-                                            ? JSON.stringify(selectedWithdrawal.currency)
-                                            : (selectedWithdrawal.currency || currency)
-                                        }
-                                    </span>
-                                </div>
-
-                                <div className="admin-withdrawal-modal__row">
-                                    <strong>{t('adminWithdrawals.paymentMethod')}:</strong>
-                                    <span>
-                                        {typeof selectedWithdrawal.paymentMethod === 'object' && selectedWithdrawal.paymentMethod !== null
-                                            ? (selectedWithdrawal.paymentMethod.name || selectedWithdrawal.paymentMethod.type || selectedWithdrawal.paymentMethod.walletId || JSON.stringify(selectedWithdrawal.paymentMethod))
-                                            : (selectedWithdrawal.paymentMethod || '-')
-                                        }
-                                    </span>
-                                </div>
-
-                                <div className="admin-withdrawal-modal__row">
-                                    <strong>{t('adminWithdrawals.status')}:</strong>
-                                    <span className={`status-badge status-${selectedWithdrawal.status || 'pending'}`}>
-                                        {selectedWithdrawal.status === 'approved'
-                                            ? t('adminWithdrawals.approved')
-                                            : selectedWithdrawal.status === 'pending'
-                                                ? t('adminWithdrawals.pending')
-                                                : selectedWithdrawal.status === 'rejected'
-                                                    ? t('adminWithdrawals.rejected')
-                                                    : selectedWithdrawal.status || t('adminWithdrawals.pending')}
-                                    </span>
-                                </div>
-
-                                <div className="admin-withdrawal-modal__row">
-                                    <strong>{t('adminWithdrawals.date')}:</strong>
-                                    <span>
-                                        {selectedWithdrawal.createdAt
-                                            ? (typeof selectedWithdrawal.createdAt === 'string' || selectedWithdrawal.createdAt instanceof Date
-                                                ? format(new Date(selectedWithdrawal.createdAt), 'PPPpp')
-                                                : String(selectedWithdrawal.createdAt))
-                                            : '-'}
-                                    </span>
-                                </div>
-
-                                {selectedWithdrawal.whatsappNumber && (
-                                    <div className="admin-withdrawal-modal__row">
-                                        <strong>{t('adminWithdrawals.whatsappNumber')}:</strong>
-                                        <span>
-                                            {typeof selectedWithdrawal.whatsappNumber === 'object' && selectedWithdrawal.whatsappNumber !== null
-                                                ? JSON.stringify(selectedWithdrawal.whatsappNumber)
-                                                : String(selectedWithdrawal.whatsappNumber || '-')
-                                            }
-                                        </span>
-                                    </div>
-                                )}
-
-                                {selectedWithdrawal.status === 'rejected' && (() => {
-                                    // Check for reason in various possible field names
-                                    const withdrawalId = selectedWithdrawal._id || selectedWithdrawal.id;
-                                    const rejectionReason = selectedWithdrawal.reason || 
-                                                           selectedWithdrawal.rejectionReason || 
-                                                           selectedWithdrawal.rejectReason ||
-                                                           selectedWithdrawal.rejection_reason ||
-                                                           rejectionReasons.get(withdrawalId);
-                                    
-                                    // Always show rejection reason section for rejected withdrawals
-                                    return (
-                                        <div className="admin-withdrawal-modal__row admin-withdrawal-modal__row--full">
-                                            <strong>{t('adminWithdrawals.rejectionReason') || 'Rejection Reason'}:</strong>
-                                            <p style={{ 
-                                                color: rejectionReason ? '#dc2626' : '#94a3b8',
-                                                fontWeight: 500,
-                                                padding: '0.5rem',
-                                                background: rejectionReason ? '#fee2e2' : '#f1f5f9',
-                                                borderRadius: '0.375rem',
-                                                borderLeft: `3px solid ${rejectionReason ? '#dc2626' : '#94a3b8'}`,
-                                                fontStyle: rejectionReason ? 'normal' : 'italic'
-                                            }}>
-                                                {rejectionReason || 'No reason provided'}
-                                            </p>
-                                        </div>
-                                    );
-                                })()}
-                            </div>
-
-                            {selectedWithdrawal.status === 'pending' && (
-                                <div className="admin-withdrawal-modal__actions">
-                                    <motion.button
-                                        className="admin-withdrawal-modal__btn admin-withdrawal-modal__btn--approve"
-                                        onClick={() => {
-                                            handleApprove(selectedWithdrawal._id || selectedWithdrawal.id);
-                                            setSelectedWithdrawal(null);
-                                        }}
-                                        disabled={processingWithdrawals.has(selectedWithdrawal._id || selectedWithdrawal.id)}
-                                        whileHover={{ scale: 1.05 }}
-                                        whileTap={{ scale: 0.95 }}
-                                    >
-                                        <FaCheck /> {t('adminWithdrawals.approve')}
-                                    </motion.button>
-                                    <motion.button
-                                        className="admin-withdrawal-modal__btn admin-withdrawal-modal__btn--reject"
-                                        onClick={() => {
-                                            setSelectedWithdrawal(null);
-                                            openRejectionModal(selectedWithdrawal._id || selectedWithdrawal.id);
-                                        }}
-                                        disabled={processingWithdrawals.has(selectedWithdrawal._id || selectedWithdrawal.id)}
-                                        whileHover={{ scale: 1.05 }}
-                                        whileTap={{ scale: 0.95 }}
-                                    >
-                                        <FaTimes /> {t('adminWithdrawals.reject')}
-                                    </motion.button>
-                                </div>
+                );
+            },
+        },
+        {
+            key: 'amount',
+            header: t('staffWithdrawals.amount'),
+            render: (row) => <strong>{formatNumber(row.amount, language)}</strong>,
+        },
+        {
+            key: 'paymentMethod',
+            header: t('staffWithdrawals.paymentMethod'),
+            render: (row) => {
+                const detailsText = formatPaymentDetails(row, language);
+                return (
+                    <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600 }}>{methodNameOf(row, language)}</span>
+                            {row.paymentMethodInfo?.type && (
+                                <StatusBadge tone="neutral">{row.paymentMethodInfo.type}</StatusBadge>
                             )}
                         </div>
+                        <div
+                            style={{
+                                fontSize: '0.75rem',
+                                opacity: 0.75,
+                                maxWidth: '260px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                            }}
+                            title={detailsText}
+                        >
+                            {detailsText}
+                        </div>
                     </div>
-                )}
+                );
+            },
+        },
+        {
+            key: 'status',
+            header: t('staffCommon.status'),
+            render: (row) => (
+                <StatusBadge tone={STATUS_TONE[row.status] || 'neutral'}>
+                    {statusLabel(row.status)}
+                </StatusBadge>
+            ),
+        },
+        {
+            key: 'createdAt',
+            header: t('staffCommon.createdAt'),
+            render: (row) => formatDate(row.createdAt, language),
+        },
+        {
+            key: 'processedAt',
+            header: t('staffWithdrawals.processedAt'),
+            render: (row) => formatDate(row.processedAt, language),
+        },
+        {
+            key: 'actions',
+            header: t('staffCommon.actions'),
+            render: (row) => {
+                const rowUserId = userIdOf(row);
+                const isSelf =
+                    Boolean(currentStaffId) &&
+                    Boolean(rowUserId) &&
+                    String(rowUserId).toLowerCase() === String(currentStaffId).toLowerCase();
+                return (
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <button
+                            type="button"
+                            className="admin-btn admin-btn--secondary admin-btn--sm"
+                            onClick={() => setDetailRow(row)}
+                        >
+                            {t('staffWithdrawals.details')}
+                        </button>
+                        {!isSelf && row.status === 'pending' && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="admin-btn admin-btn--primary admin-btn--sm"
+                                    onClick={() => setActionModal({ row, nextStatus: 'approved' })}
+                                >
+                                    {t('staffWithdrawals.approve')}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="admin-btn admin-btn--danger admin-btn--sm"
+                                    onClick={() => setActionModal({ row, nextStatus: 'rejected' })}
+                                >
+                                    {t('staffWithdrawals.reject')}
+                                </button>
+                            </>
+                        )}
+                        {!isSelf && row.status === 'approved' && (
+                            <>
+                                <button
+                                    type="button"
+                                    className="admin-btn admin-btn--primary admin-btn--sm"
+                                    onClick={() => setActionModal({ row, nextStatus: 'completed' })}
+                                >
+                                    {t('staffWithdrawals.complete')}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="admin-btn admin-btn--danger admin-btn--sm"
+                                    onClick={() => setActionModal({ row, nextStatus: 'rejected' })}
+                                >
+                                    {t('staffWithdrawals.reject')}
+                                </button>
+                            </>
+                        )}
+                    </div>
+                );
+            },
+        },
+    ];
 
-            {/* Rejection Reason Modal */}
-            {rejectionModal.isOpen && (
-                <div
-                    className="admin-withdrawal-modal-backdrop"
-                    onClick={() => setRejectionModal({ isOpen: false, withdrawalId: null, reason: '' })}
-                >
-                    <div
-                        className="admin-withdrawal-modal"
-                        onClick={(e) => e.stopPropagation()}
+    const modalTitle =
+        actionModal?.nextStatus === 'approved'
+            ? t('staffWithdrawals.approveTitle')
+            : actionModal?.nextStatus === 'completed'
+              ? t('staffWithdrawals.completeTitle')
+              : t('staffWithdrawals.rejectTitle');
+
+    const modalDescription = actionModal
+        ? t(
+              actionModal.nextStatus === 'approved'
+                  ? 'staffWithdrawals.approveDescription'
+                  : actionModal.nextStatus === 'completed'
+                    ? 'staffWithdrawals.completeDescription'
+                    : 'staffWithdrawals.rejectDescription',
+              {
+                  amount: formatNumber(actionModal.row.amount, language),
+                  user: userDisplay(actionModal.row),
+              },
+          )
+        : '';
+
+    const modalConfirmLabel =
+        actionModal?.nextStatus === 'approved'
+            ? t('staffWithdrawals.approve')
+            : actionModal?.nextStatus === 'completed'
+              ? t('staffWithdrawals.complete')
+              : t('staffWithdrawals.reject');
+
+    return (
+        <AdminPage
+            icon={FaMoneyBillWave}
+            title={t('staffWithdrawals.title')}
+            subtitle={t('staffWithdrawals.subtitle')}
+        >
+            <AdminTabs
+                tabs={tabs}
+                active={list.filters.status || ''}
+                onChange={(key) => list.setFilter('status', key)}
+            />
+
+            <AdminTable
+                title={t('staffWithdrawals.title')}
+                columns={columns}
+                rows={list.rows}
+                rowKey="_id"
+                loading={list.isLoading}
+                error={list.error}
+                onRetry={list.refetch}
+                meta={list.meta}
+                onPageChange={list.setPage}
+            />
+
+            <ReasonModal
+                open={Boolean(actionModal)}
+                title={modalTitle}
+                description={modalDescription}
+                confirmLabel={modalConfirmLabel}
+                tone={actionModal?.nextStatus === 'rejected' ? 'danger' : 'primary'}
+                hideReason={actionModal?.nextStatus !== 'rejected'}
+                reasonRequired={actionModal?.nextStatus === 'rejected'}
+                maxLength={500}
+                onConfirm={handleConfirmAction}
+                onClose={() => setActionModal(null)}
+            />
+
+            <AdminModal
+                open={Boolean(detailRow)}
+                title={t('staffWithdrawals.detailsTitle')}
+                onClose={() => setDetailRow(null)}
+                footer={
+                    <button
+                        type="button"
+                        className="admin-btn admin-btn--secondary"
+                        onClick={() => setDetailRow(null)}
                     >
-                        <div className="admin-withdrawal-modal__header">
-                            <h2>{t('adminWithdrawals.rejectWithdrawal') || 'Reject Withdrawal'}</h2>
-                            <button
-                                onClick={() => setRejectionModal({ isOpen: false, withdrawalId: null, reason: '' })}
-                                className="admin-withdrawal-modal__close"
-                                aria-label="Close"
-                            >
-                                <FaTimes />
-                            </button>
-                        </div>
-
-                        <div className="admin-withdrawal-modal__body">
-                            <div className="admin-withdrawal-modal__row admin-withdrawal-modal__row--full">
-                                <label htmlFor="rejection-reason">
-                                    <strong>{t('adminWithdrawals.rejectionReason') || 'Reason for Rejection'} *</strong>
-                                </label>
-                                <textarea
-                                    id="rejection-reason"
-                                    className="admin-withdrawal-modal__textarea"
-                                    value={rejectionModal.reason}
-                                    onChange={(e) => setRejectionModal(prev => ({ ...prev, reason: e.target.value }))}
-                                    placeholder={t('adminWithdrawals.enterRejectionReason') || 'Please provide a reason for rejecting this withdrawal request...'}
-                                    rows={4}
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        <div className="admin-withdrawal-modal__actions">
-                            <motion.button
-                                className="admin-withdrawal-modal__btn admin-withdrawal-modal__btn--cancel"
-                                onClick={() => setRejectionModal({ isOpen: false, withdrawalId: null, reason: '' })}
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                            >
-                                {t('adminWithdrawals.cancel') || 'Cancel'}
-                            </motion.button>
-                            <motion.button
-                                className="admin-withdrawal-modal__btn admin-withdrawal-modal__btn--reject"
-                                onClick={handleReject}
-                                disabled={!rejectionModal.reason?.trim() || processingWithdrawals.has(rejectionModal.withdrawalId)}
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                            >
-                                <FaTimes /> {t('adminWithdrawals.confirmReject') || 'Confirm Rejection'}
-                            </motion.button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+                        {t('staffCommon.close')}
+                    </button>
+                }
+            >
+                {detailRow && (
+                    <DetailList
+                        items={[
+                            { label: t('staffCommon.id'), value: detailRow._id },
+                            {
+                                label: t('staffCommon.user'),
+                                value: userIdOf(detailRow) ? (
+                                    <Link to={`/Owner/Users/${userIdOf(detailRow)}`}>
+                                        {userDisplay(detailRow)}
+                                    </Link>
+                                ) : null,
+                            },
+                            {
+                                label: t('staffWithdrawals.amount'),
+                                value: formatNumber(detailRow.amount, language),
+                            },
+                            {
+                                label: t('staffCommon.status'),
+                                value: (
+                                    <StatusBadge tone={STATUS_TONE[detailRow.status] || 'neutral'}>
+                                        {statusLabel(detailRow.status)}
+                                    </StatusBadge>
+                                ),
+                            },
+                            {
+                                label: t('staffWithdrawals.paymentMethod'),
+                                value: methodNameOf(detailRow, language),
+                            },
+                            ...(detailRow.paymentMethodInfo?.type
+                                ? [
+                                      {
+                                          label: t('staffPaymentMethods.methodType'),
+                                          value: detailRow.paymentMethodInfo.type,
+                                      },
+                                  ]
+                                : []),
+                            {
+                                label: t('staffWithdrawals.paymentDetails'),
+                                value: formatPaymentDetails(detailRow, language),
+                            },
+                            {
+                                label: t('staffCommon.createdAt'),
+                                value: formatDate(detailRow.createdAt, language),
+                            },
+                            {
+                                label: t('staffWithdrawals.processedAt'),
+                                value: formatDate(detailRow.processedAt, language),
+                            },
+                            {
+                                label: t('staffWithdrawals.rejectionReason'),
+                                value: detailRow.rejectionReason,
+                            },
+                        ]}
+                    />
+                )}
+            </AdminModal>
+        </AdminPage>
     );
 }
-

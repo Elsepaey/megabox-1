@@ -5,14 +5,14 @@ import { RiFolderVideoFill } from "react-icons/ri";
 import { IoImageSharp, IoDocumentsSharp } from "react-icons/io5";
 import { AgoFormatter } from '../../helpers/DateFormates';
 import { FiArchive, FiMoreVertical, FiFolder } from 'react-icons/fi';
-import { HiTrash, HiPencil, HiShare, HiFolderOpen, HiEye } from "react-icons/hi2";
+import { HiTrash, HiPencil, HiShare, HiFolderOpen, HiEye, HiLinkSlash } from "react-icons/hi2";
 import { FaFilePdf, FaFileWord, FaFileExcel, FaFilePowerpoint, FaFileAlt, FaPlay } from 'react-icons/fa';
 import { LuFileArchive } from 'react-icons/lu';
 import { useAuth } from '../../context/AuthContext';
 import { useCookies } from 'react-cookie';
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../helpers/ToastOptions';
-import { API_URL, fileService } from '../../services/api';
+import { fileService } from '../../services/api';
 import { itemsService } from '../../services/itemsService';
 import { useQueryClient } from 'react-query';
 import { useLanguage } from '../../context/LanguageContext';
@@ -206,8 +206,7 @@ const typeConfig = {
     }
 };
 
-export default function File({ Type, data, Representation, onRename, refetch, onShare, viewMode, isSelectionMode, isSelected, onToggleSelect, onOpen }) {
-
+export default function File({ Type, data, Representation, onRename, onDelete, onArchive, refetch, onShare, onDisableShare, viewMode, isSelectionMode, isSelected, onToggleSelect, onOpen, readOnly = false }) {
     const [showMenu, setShowMenu] = useState(false);
     const { url, createdAt, fileName, fileType, _id } = data;
     const config = typeConfig[Type];
@@ -290,9 +289,8 @@ export default function File({ Type, data, Representation, onRename, refetch, on
         }
 
         if (Type === 'image' || Type === 'video' || Type === 'document') {
-            // Use onOpen callback if provided (UnifiedItemList), otherwise use Representation (old Files.jsx)
             if (onOpen) {
-                onOpen(data);
+                onOpen({ ...data, url: fileUrl, accessUrl: fileUrl, fileType: resolvedType });
             } else if (Representation) {
                 Representation(fileUrl, resolvedType);
             }
@@ -300,58 +298,29 @@ export default function File({ Type, data, Representation, onRename, refetch, on
     };
 
 
+    const invalidateFileQueries = () => {
+        queryClient.invalidateQueries({ queryKey: ["items"] });
+        queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
+        queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
+        queryClient.invalidateQueries({ queryKey: ["getMyArchives"] });
+        queryClient.invalidateQueries({
+            predicate: (query) =>
+                typeof query.queryKey?.[0] === 'string' && query.queryKey[0].startsWith('GetUserFile-')
+        });
+    };
+
     const handleArchive = async () => {
         try {
             setShowMenu(false);
-            
-            // Call API first
-            await fileService.archiveFile(_id, MegaBox.MegaBox);
 
-            const fileIdStr = String(_id);
-            
-            // Remove from ALL filter caches immediately (including "All" with capital A)
-            const filterKeys = ["All", "all", "image", "video", "document", "zip"];
-            filterKeys.forEach(key => {
-                queryClient.setQueryData(["GetUserFiles", key], (oldData) => {
-                    if (!oldData?.files) return oldData;
-                    return {
-                        ...oldData,
-                        files: oldData.files.filter(f => {
-                            const fId = String(f._id || f.id);
-                            return fId !== fileIdStr;
-                        })
-                    };
-                });
-            });
-            
-            // Also remove from getMyZips cache if this is a zip file
-            queryClient.setQueryData("getMyZips", (oldData) => {
-                if (!oldData?.zips && !oldData?.files) return oldData;
-                const zips = oldData?.zips || oldData?.files || [];
-                return {
-                    ...oldData,
-                    zips: zips.filter(zip => {
-                        const zipId = String(zip._id || zip.id);
-                        return zipId !== fileIdStr;
-                    }),
-                    files: zips.filter(zip => {
-                        const zipId = String(zip._id || zip.id);
-                        return zipId !== fileIdStr;
-                    })
-                };
-            });
-            
-            // Invalidate all file queries to force refetch on next access
-            queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
-            queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
-            queryClient.invalidateQueries({ queryKey: ["getMyZips"] });
-            queryClient.invalidateQueries({ queryKey: ["getMyArchives"] });
-            
-            // Update archived count
-            queryClient.setQueryData("GetArchivedFilesCount", (oldCount) => {
-                return (oldCount || 0) + 1;
-            });
-            
+            if (onArchive) {
+                await onArchive(data);
+                invalidateFileQueries();
+                return;
+            }
+
+            await fileService.archiveFile(_id, MegaBox.MegaBox);
+            invalidateFileQueries();
             toast.success(t("file.fileArchivedSuccessfully") || "File archived successfully", ToastOptions("success"));
 
             if (refetch) {
@@ -365,108 +334,25 @@ export default function File({ Type, data, Representation, onRename, refetch, on
     const handleUnarchive = async () => {
         try {
             setShowMenu(false);
-            
-            // Call API first
             await fileService.unarchiveFile(_id, MegaBox.MegaBox);
-            
-            // Remove from archived cache
-            queryClient.setQueryData(["GetUserFiles", "archived"], (oldData) => {
-                if (!oldData?.files) return oldData;
-                return {
-                    ...oldData,
-                    files: oldData.files.filter(f => (f._id || f.id) !== _id)
-                };
-            });
-            
-            // Add back to all filter caches (All, image, video, document, zip)
-            const filterKeys = ["All", "all", "image", "video", "document", "zip"];
-            const unarchivedFile = { ...data, archived: false, isArchived: false };
-            
-            filterKeys.forEach(key => {
-                queryClient.setQueryData(["GetUserFiles", key], (oldData) => {
-                    if (!oldData?.files) {
-                        return { files: [unarchivedFile] };
-                    }
-                    // Check if file already exists to avoid duplicates
-                    const exists = oldData.files.some(f => (f._id || f.id) === _id);
-                    if (exists) {
-                        return oldData;
-                    }
-                    return {
-                        ...oldData,
-                        files: [...oldData.files, unarchivedFile]
-                    };
-                });
-            });
-            
-            // Update archived count
-            queryClient.setQueryData("GetArchivedFilesCount", (oldCount) => {
-                return Math.max(0, (oldCount || 0) - 1);
-            });
-            
-            // Invalidate all queries to force refetch - including getMyArchives
-            queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
-            queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
-            queryClient.invalidateQueries({ queryKey: ["getMyArchives"] });
-            
-            // Show success message
-            toast.success("File unarchived successfully", ToastOptions("success"));
-            
-            // Refetch to update UI
+            invalidateFileQueries();
+            toast.success(t("file.fileUnarchivedSuccessfully") || "File unarchived successfully", ToastOptions("success"));
+
             if (refetch) {
                 await refetch();
             }
-            
         } catch (error) {
             console.error("Unarchive error:", error);
             const errorMessage = error?.response?.data?.message || error?.message || "Failed to unarchive file";
-            
-            // If 404, the archive might not exist - still try to refresh
             if (error?.response?.status === 404) {
                 toast.warning("Archive not found. Refreshing file list...", ToastOptions("warning"));
-                // Invalidate and refetch to sync with server
-                queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
-                queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
+                invalidateFileQueries();
                 if (refetch) {
                     await refetch();
                 }
             } else {
                 toast.error(errorMessage, ToastOptions("error"));
             }
-        }
-    };
-
-    const handleCreateZip = async () => {
-        try {
-            const items = [{ type: "file", id: _id }];
-            await fileService.createZip(items, MegaBox.MegaBox);
-            // Invalidate queries to refresh the file list
-            queryClient.invalidateQueries(["GetUserFiles"]);
-            refetch();
-        } catch {
-            // Error is handled in the service
-        }
-    };
-
-    const handleDisableShare = async () => {
-        try {
-            await fileService.disableFileShare(_id, MegaBox.MegaBox);
-            // Invalidate shared files and folders queries to remove disabled items from shared lists
-            queryClient.invalidateQueries(['sharedFilesByUser']);
-            queryClient.invalidateQueries('GetSharedFolders');
-            // Also invalidate share link analytics to update the shared links table
-            queryClient.invalidateQueries(['shareLinkAnalytics']);
-            // Explicitly refetch both queries to ensure UI updates immediately
-            // Refetch sharedFilesByUser to remove from shared files cards
-            await queryClient.refetchQueries(['sharedFilesByUser']);
-            // Refetch shareLinkAnalytics to remove from shared links table
-            await queryClient.refetchQueries(['shareLinkAnalytics']);
-            // Also refetch current file list if refetch function is provided
-            if (refetch) {
-                await refetch();
-            }
-        } catch {
-            // Error is handled in the service
         }
     };
 
@@ -477,53 +363,27 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                 handleOpenFile();
                 break;
             case 'delete': {
-                // Check if this is a zip file - zip files need special handling
-                const isZipFile = Type === 'zip' || fileType === 'application/zip' || fileType?.includes('zip');
-                
-                let DeleteRes;
-                if (isZipFile) {
-                    // Use deleteZip for zip files (created via createZip)
-                    DeleteRes = await fileService.deleteZip(_id, MegaBox.MegaBox);
-                } else {
-                    // Use regular deleteFile for normal files
-                    DeleteRes = await DeleteFile(_id, MegaBox.MegaBox);
+                if (onDelete) {
+                    await onDelete(data);
+                    invalidateFileQueries();
+                    break;
                 }
-
+                const DeleteRes = await DeleteFile(_id, MegaBox.MegaBox);
                 if (DeleteRes) {
                     toast.success(t("file.fileDeletedSuccessfully") || "File deleted successfully", ToastOptions("success"));
-                    const fileIdStr = String(_id);
-                    queryClient.setQueryData(["GetUserFiles", "All"], (oldData) => {
-                        if (!oldData?.files) return oldData;
-                        return {
-                            ...oldData,
-                            files: oldData.files.filter(f => String(f._id || f.id) !== fileIdStr)
-                        };
-                    });
-                    if (isZipFile) {
-                        queryClient.setQueryData("getMyZips", (oldData) => {
-                            if (!oldData?.zips && !oldData?.files) return oldData;
-                            const zips = oldData?.zips || oldData?.files || [];
-                            return {
-                                ...oldData,
-                                zips: zips.filter(zip => String(zip._id || zip.id) !== fileIdStr),
-                                files: zips.filter(zip => String(zip._id || zip.id) !== fileIdStr)
-                            };
-                        });
-                    }
-                    queryClient.invalidateQueries({ queryKey: ["GetUserFiles"] });
-                    queryClient.invalidateQueries({ queryKey: ["getMyZips"] });
+                    invalidateFileQueries();
                 }
-                refetch();
+                if (refetch) refetch();
                 break;
             }
             case 'rename':
-                onRename(fileName, false, _id);
+                if (onRename) onRename(fileName, false, _id);
                 break;
             case "share":
-                await onShare(_id)
+                if (onShare) await onShare(_id);
                 break;
             case "disableShare":
-                await handleDisableShare();
+                if (onDisableShare) await onDisableShare(_id);
                 break;
             case "archive":
                 await handleArchive();
@@ -531,13 +391,20 @@ export default function File({ Type, data, Representation, onRename, refetch, on
             case "unarchive":
                 await handleUnarchive();
                 break;
-            case "createZip":
-                await handleCreateZip();
-                break;
             default:
                 break;
         }
     };
+
+    const isArchived = data?.archived === true || data?.isArchived === true;
+    const isShared = Boolean(data?.isShared);
+    const canOpen = (Type === 'image' || Type === 'zip' || Type === 'video' || Type === 'document') && (Type === 'zip' || Boolean(onOpen || Representation));
+    const canRename = !readOnly && Boolean(onRename);
+    const canShare = !readOnly && Boolean(onShare);
+    const canDisableShare = !readOnly && isShared && Boolean(onDisableShare);
+    const canArchiveAction = !readOnly && (isArchived || Boolean(onArchive));
+    const canDelete = !readOnly && Boolean(onDelete || DeleteFile);
+    const hasMenuActions = canOpen || canRename || canShare || canDisableShare || canArchiveAction || canDelete;
 
     // Early return after all hooks
     if (!config) return null;
@@ -586,25 +453,27 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                     />
                 </div>
             )}
-            <div
-                ref={buttonRef}
-                className={`absolute top-2 z-[100] file-menu-button ${language === 'ar' ? 'left-2' : 'right-2'}`}
-                onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setShowMenu(!showMenu);
-                }}
-                onTouchEnd={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setShowMenu(!showMenu);
-                }}
-                style={{ pointerEvents: 'auto', touchAction: 'manipulation', zIndex: 99998 }}
-            >
-                <FiMoreVertical className="w-5 h-5 text-indigo-600 cursor-pointer hover:text-indigo-800 transition-colors" />
-            </div>
+            {hasMenuActions && (
+                <div
+                    ref={buttonRef}
+                    className={`absolute top-2 z-[100] file-menu-button ${language === 'ar' ? 'left-2' : 'right-2'}`}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowMenu(!showMenu);
+                    }}
+                    onTouchEnd={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowMenu(!showMenu);
+                    }}
+                    style={{ pointerEvents: 'auto', touchAction: 'manipulation', zIndex: 99998 }}
+                >
+                    <FiMoreVertical className="w-5 h-5 text-indigo-600 cursor-pointer hover:text-indigo-800 transition-colors" />
+                </div>
+            )}
 
-            {showMenu && (
+            {showMenu && hasMenuActions && (
                 <div
                     ref={menuRef}
                     className={`absolute top-10 bg-white border-2 border-indigo-100 shadow-xl rounded-lg py-1.5 text-xs min-w-[160px] max-h-[280px] overflow-y-auto file-dropdown-menu ${language === 'ar' ? 'left-2' : 'right-2'}`}
@@ -613,7 +482,7 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                     onTouchStart={(e) => e.stopPropagation()}
                     onTouchEnd={(e) => e.stopPropagation()}
                 >
-                    {(Type === 'image' || Type === 'zip' || Type === 'video' || Type === 'document') && (
+                    {canOpen && (
                         <button
                             onClick={(e) => {
                                 e.preventDefault();
@@ -641,42 +510,26 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                             )}
                         </button>
                     )}
-                    <button
-                        onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleAction('rename');
-                        }}
-                        onTouchEnd={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleAction('rename');
-                        }}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
-                        style={{ pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'rgba(0,0,0,0.1)' }}
-                    >
-                        <HiPencil className='w-4 h-4 text-green-600' />
-                        <span className="font-medium">{t("file.rename") || "Rename"}</span>
-                    </button>
-                    {(data?.shareLink || data?.shareUrl || data?.sharedUrl || data?._sharedUrl || data?.isShared === true || data?.isShared === "true" || data?.shared === true || data?.shared === "true") ? (
+                    {canRename && (
                         <button
                             onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleAction('disableShare');
+                                handleAction('rename');
                             }}
                             onTouchEnd={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                handleAction('disableShare');
+                                handleAction('rename');
                             }}
-                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-orange-50 w-full text-left transition-colors text-orange-600"
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
                             style={{ pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'rgba(0,0,0,0.1)' }}
                         >
-                            <HiShare className='w-4 h-4 text-orange-600 rotate-180' />
-                            <span className="font-medium">{t("file.disableShare") || "Disable Share"}</span>
+                            <HiPencil className='w-4 h-4 text-green-600' />
+                            <span className="font-medium">{t("file.rename") || "Rename"}</span>
                         </button>
-                    ) : (
+                    )}
+                    {canShare && (
                         <button
                             onClick={(e) => {
                                 e.preventDefault();
@@ -695,7 +548,26 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                             <span className="font-medium">{t("file.share") || "Share"}</span>
                         </button>
                     )}
-                    {(data?.archived === true || data?.isArchived === true) ? (
+                    {canDisableShare && (
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleAction('disableShare');
+                            }}
+                            onTouchEnd={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleAction('disableShare');
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-amber-50 w-full text-left transition-colors text-amber-700"
+                            style={{ pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'rgba(0,0,0,0.1)' }}
+                        >
+                            <HiLinkSlash className='w-4 h-4 text-amber-600' />
+                            <span className="font-medium">{t("filesV2.disableSharing") || "Disable sharing"}</span>
+                        </button>
+                    )}
+                    {canArchiveAction && (isArchived ? (
                         <button
                             onClick={(e) => {
                                 e.preventDefault();
@@ -714,63 +586,46 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                             <span className="font-medium">{t("file.unarchive") || "Unarchive"}</span>
                         </button>
                     ) : (
+                        <button
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleAction('archive');
+                            }}
+                            onTouchEnd={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleAction('archive');
+                            }}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
+                            style={{ pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'rgba(0,0,0,0.1)' }}
+                        >
+                            <FiArchive className='w-4 h-4 text-purple-600' />
+                            <span className="font-medium">{t("file.archive") || "Archive"}</span>
+                        </button>
+                    ))}
+                    {canDelete && (
                         <>
-                            {Type !== 'zip' && (
-                                <button
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleAction('createZip');
-                                    }}
-                                    onTouchEnd={(e) => {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        handleAction('createZip');
-                                    }}
-                                    className="flex items-center gap-2 px-3 py-1.5 hover:bg-amber-50 w-full text-left transition-colors text-amber-600"
-                                    style={{ pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'rgba(0,0,0,0.1)' }}
-                                >
-                                    <LuFileArchive className='w-4 h-4 text-amber-600' />
-                                    <span className="font-medium">{t("file.createZip") || "Create Zip"}</span>
-                                </button>
-                            )}
+                            <div className="border-t border-gray-200 my-1"></div>
                             <button
                                 onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    handleAction('archive');
+                                    handleAction('delete');
                                 }}
                                 onTouchEnd={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    handleAction('archive');
+                                    handleAction('delete');
                                 }}
-                                className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
+                                className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 w-full text-left transition-colors text-red-600"
                                 style={{ pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'rgba(0,0,0,0.1)' }}
                             >
-                                <FiArchive className='w-4 h-4 text-purple-600' />
-                                <span className="font-medium">{t("file.archive") || "Archive"}</span>
+                                <HiTrash className='w-4 h-4 text-red-600' />
+                                <span className="font-medium">{t("file.delete") || "Delete"}</span>
                             </button>
                         </>
                     )}
-                    <div className="border-t border-gray-200 my-1"></div>
-                    <button
-                        onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleAction('delete');
-                        }}
-                        onTouchEnd={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleAction('delete');
-                        }}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 w-full text-left transition-colors text-red-600"
-                        style={{ pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'rgba(0,0,0,0.1)' }}
-                    >
-                        <HiTrash className='w-4 h-4 text-red-600' />
-                        <span className="font-medium">{t("file.delete") || "Delete"}</span>
-                    </button>
                 </div>
             )}
 
@@ -787,7 +642,13 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                             <div style={config.previewStyle(url, fileName, data)} className="w-full h-full" />
                         )}
                     </div>
-                    <div className="flex-shrink-0 text-right">
+                    <div className="flex-shrink-0 text-right flex items-center gap-2">
+                        {isShared && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                                <HiShare className="w-3 h-3" />
+                                {t("filesV2.sharedBadge") || "Shared"}
+                            </span>
+                        )}
                         <p className='text-sm text-gray-500'>{AgoFormatter(createdAt)}</p>
                     </div>
                 </>
@@ -804,7 +665,15 @@ export default function File({ Type, data, Representation, onRename, refetch, on
                             <div style={config.previewStyle(url, fileName, data)} className="w-full h-full" />
                         )}
                     </div>
-                    <div className="w-full h-[60px] flex justify-end items-center p-2">
+                    <div className="w-full h-[60px] flex justify-between items-center p-2 gap-2">
+                        <div>
+                            {isShared && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                                    <HiShare className="w-3 h-3" />
+                                    {t("filesV2.sharedBadge") || "Shared"}
+                                </span>
+                            )}
+                        </div>
                         <p className='text-sm text-gray-500'>{AgoFormatter(createdAt)}</p>
                     </div>
                 </>

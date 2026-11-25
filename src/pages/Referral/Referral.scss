@@ -227,7 +227,7 @@
 
 .referral-stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 1.5rem;
     margin-bottom: 2rem;
 
@@ -289,6 +289,26 @@
         @include mix.media-breakpoint-down(md) {
             font-size: vars.$text-lg;
         }
+    }
+
+    &__card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.75rem;
+    }
+
+    &__icon {
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 0.625rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #eef2ff;
+        color: var(--color-indigo-600);
+        font-size: 1.125rem;
+        flex-shrink: 0;
     }
 }
 
@@ -372,6 +392,80 @@
                     }
                 }
             }
+        }
+    }
+}
+
+.refer-users-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.referral-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.625rem;
+    border-radius: 9999px;
+    font-size: vars.$text-xs;
+    font-weight: 600;
+    white-space: nowrap;
+
+    &--confirmed {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    &--unconfirmed {
+        background: #f1f5f9;
+        color: #475569;
+    }
+
+    &--promoter {
+        background: #ede9fe;
+        color: #5b21b6;
+    }
+
+    &--standard {
+        background: #f1f5f9;
+        color: #475569;
+    }
+}
+
+.refer-users-state {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: #4b5563;
+
+    &__icon {
+        font-size: 2rem;
+        color: var(--color-indigo-500);
+        margin-bottom: 0.75rem;
+    }
+
+    &__title {
+        font-size: vars.$text-lg;
+        font-weight: 600;
+        color: #1e293b;
+        margin-bottom: 0.375rem;
+    }
+
+    &__desc {
+        font-size: vars.$text-sm;
+        margin-bottom: 1rem;
+    }
+
+    &__retry {
+        padding: 0.5rem 1.25rem;
+        background: var(--color-indigo-600);
+        color: white;
+        border: none;
+        border-radius: 0.5rem;
+        font-size: vars.$text-sm;
+        font-weight: 600;
+        cursor: pointer;
+
+        &:hover {
+            background: var(--color-indigo-700);
         }
     }
 }

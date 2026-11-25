@@ -7,7 +7,6 @@ export { fileService } from './fileService';
 export { userService } from './userService';
 export { withdrawalService } from './withdrawalService';
 export { notificationService } from './notificationService';
-export { adminService } from './adminService';
 export { privacyTermsService } from './privacyTermsService';
 
 // Upload + fetch services for the new backend

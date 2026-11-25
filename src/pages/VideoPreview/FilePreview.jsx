@@ -46,9 +46,7 @@ export default function FilePreview({ fileType }) {
 
 
     if (getFileCategoryByExtension(type) === 'document') {
-        const extension = url.split('.').pop()?.toLowerCase();
-
-        // Choose an icon based on extension
+        const extension = (url || fileType?.fileName || fileType?.name || '').split('.').pop()?.toLowerCase();
         let DocIcon = FaFileAlt;
         if (extension?.toLowerCase() === 'pdf') DocIcon = FaFilePdf;
         else if (['doc', 'docx'].includes(extension)) DocIcon = FaFileWord;

@@ -23,13 +23,7 @@ export async function recordDownload(token, { fileId, fileName, fileType, fileSi
     return data;
 }
 
-export async function checkDownloadPermission(token, fileId) {
-    const { data } = await api.post('/files/download', { fileId }, authHeaders(token));
-    return data;
-}
-
 export const downloadService = {
     checkDownloadLimit,
     recordDownload,
-    checkDownloadPermission,
 };

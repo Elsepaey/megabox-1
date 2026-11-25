@@ -4,18 +4,17 @@ import { useQuery, useQueryClient } from 'react-query';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
-import { API_URL, userService, fileService } from '../../../services/api';
-import { itemsService, getAllUnifiedItems } from '../../../services/itemsService';
+import { userService, fileService } from '../../../services/api';
+import { getAllUnifiedItems } from '../../../services/itemsService';
 import { getFileCategory } from '../../../helpers/MimeType';
-import File from '../../../components/File/File';
-import { Folder } from '../../../components/Folder/Folder';
 import UnifiedItemList from '../../../components/UnifiedItemList/UnifiedItemList';
 import UploadFile from '../../../components/Upload/UploadFile/UploadFile';
 import UploadOptions from '../../../components/Upload/UploadOptions/UploadOptions';
 import UploadFromMegaBox from '../../../components/Upload/UploadFromMegaBox/UploadFromMegaBox';
+import CreateZipModal from '../../../components/Upload/CreateZipModal/CreateZipModal';
 import AddFolder from '../../../components/Upload/AddFolder/AddFolder';
 import { HiOutlinePlus } from 'react-icons/hi2';
-import { LuFolderPlus } from 'react-icons/lu';
+import { LuFolderPlus, LuFileArchive } from 'react-icons/lu';
 import { HiViewGrid, HiViewList } from "react-icons/hi";
 import { HiArrowLeft, HiArrowRight, HiUserGroup } from 'react-icons/hi2';
 import { FaTimes } from 'react-icons/fa';
@@ -36,7 +35,6 @@ export default function FileDetails() {
 
     const { fileId } = useParams();
     
-    // Determine the files route based on current path
     const getFilesRoute = () => {
         if (location.pathname.includes('/Promoter')) {
             return '/Promoter/files';
@@ -44,6 +42,15 @@ export default function FileDetails() {
             return '/Owner/files';
         }
         return '/dashboard/files';
+    };
+
+    const getFolderBasePath = () => {
+        if (location.pathname.includes('/Promoter')) {
+            return '/Promoter/file';
+        } else if (location.pathname.includes('/Owner')) {
+            return '/Owner/file';
+        }
+        return '/dashboard/file';
     };
     const [FilterKey, setFilterKey] = useState('All');
     const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
@@ -61,25 +68,14 @@ export default function FileDetails() {
         return items; // Returns mixed array of files and folders
     };
     
-    // Get user folders to find subfolders
-    const GetFolders = async () => {
-        try {
-            const items = await getAllUnifiedItems(Token.MegaBox, { type: 'folders' });
-            // Filter to get only folders
-            const folders = items.filter(item => item.isFolder || item.itemType === 'folder');
-            return { folders };
-        } catch {
-            return { folders: [] };
-        }
-    };
 
     const [AddFileShow, setAddFileShow] = useState(false);
     const [showUploadOptions, setShowUploadOptions] = useState(false);
-    const [showUploadFromMegaBox, setShowUploadFromMegaBox] = useState(false);
+    const [showCopyFromMegaBox, setShowCopyFromMegaBox] = useState(false);
+    const [showCreateZipModal, setShowCreateZipModal] = useState(false);
     const [AddFolderAdding, setAddFolderAdding] = useState(false);
     const ToggleShowAddFile = () => setAddFileShow(!AddFileShow);
     const ToggleUploadOptions = () => setShowUploadOptions(!showUploadOptions);
-    const ToggleUploadFromMegaBox = () => setShowUploadFromMegaBox(!showUploadFromMegaBox);
     const ToggleFolderAdding = () => setAddFolderAdding(!AddFolderAdding);
 
     const handleSelectDesktop = () => {
@@ -87,7 +83,19 @@ export default function FileDetails() {
     };
 
     const handleSelectMegaBox = () => {
-        setShowUploadFromMegaBox(true);
+        setShowCopyFromMegaBox(true);
+    };
+
+    const handleDisableShare = async (itemType, itemId) => {
+        try {
+            await fileService.disableItemShare(itemType, itemId, Token.MegaBox);
+            toast.success(t('filesV2.sharingDisabled') || 'Sharing disabled', ToastOptions('success'));
+            queryClient.invalidateQueries(['items']);
+            queryClient.invalidateQueries(['myShares']);
+            await refetchFolderData();
+        } catch (error) {
+            toast.error(error?.message || t('filesV2.disableSharingFailed') || 'Failed to disable sharing', ToastOptions('error'));
+        }
     };
 
     const { data: unifiedItems, refetch, isLoading: filesLoading } = useQuery([`GetUserFile-${fileId}`, FilterKey], GetFiles, {
@@ -109,9 +117,6 @@ export default function FileDetails() {
         return { files, folders };
     }, [unifiedItems]);
     
-    const { data: foldersData, refetch: refetchFolders } = useQuery(['userFolders'], GetFolders, {
-        enabled: !!Token.MegaBox,
-    });
     
     // Get user data to check if user is promoter
     const { data: userData } = useQuery(
@@ -131,29 +136,13 @@ export default function FileDetails() {
         ToggleUploadOptions();
     };
 
-    // Enhanced refetch function that also invalidates related queries
     const refetchFolderData = async () => {
         try {
-            // First, invalidate all folder-related queries (this marks them as stale)
             queryClient.invalidateQueries(['userFolders']);
-            queryClient.invalidateQueries(['GetUserFolders']);
-            
-            // Refetch the local folders query first
-            await refetchFolders();
-            
-            // Refetch the current folder's files
+            queryClient.invalidateQueries(['items']);
             await queryClient.invalidateQueries([`GetUserFile-${fileId}`, FilterKey]);
             await refetch();
-            
-            // Force refetch all queries with 'userFolders' key (including sidenav)
-            // Using refetchQueries without active filter to refetch all matching queries
-            await queryClient.refetchQueries(['userFolders'], { 
-                exact: false,
-                type: 'active'
-            });
-            
-            // Also refetch GetUserFolders queries
-            await queryClient.refetchQueries(['GetUserFolders'], { 
+            await queryClient.refetchQueries(['userFolders'], {
                 exact: false,
                 type: 'active'
             });
@@ -220,6 +209,9 @@ export default function FileDetails() {
                     setShareUrl(link);
                     setShareTitle("Share Folder");
                     setShowShareModal(true);
+                    queryClient.invalidateQueries(['items']);
+                    queryClient.invalidateQueries(['myShares']);
+                    await refetchFolderData();
                 } else {
                     toast.error("Failed to generate share link", ToastOptions("error"));
                 }
@@ -232,9 +224,15 @@ export default function FileDetails() {
                     setShareUrl(link);
                     setShareTitle("Share File");
                     setShowShareModal(true);
+                    queryClient.invalidateQueries(['items']);
+                    queryClient.invalidateQueries(['myShares']);
+                    await refetchFolderData();
                 } else if (response?.message && (response.message.includes('نجاح') || response.message.includes('success'))) {
                     // If success message but no link, still show success (link might be in different format)
                     toast.success(response.message || "Share link generated successfully", ToastOptions("success"));
+                    queryClient.invalidateQueries(['items']);
+                    queryClient.invalidateQueries(['myShares']);
+                    await refetchFolderData();
                 } else {
                     toast.error("Failed to generate share link", ToastOptions("error"));
                 }
@@ -244,59 +242,13 @@ export default function FileDetails() {
         }
     }
 
-    // Find a folder by ID in the nested structure
-    const findFolderById = (folders, folderId) => {
-        if (!folders || !Array.isArray(folders)) return null;
-        for (const folder of folders) {
-            if (folder._id === folderId) {
-                return folder;
-            }
-            if (folder.children && folder.children.length > 0) {
-                const found = findFolderById(folder.children, folderId);
-                if (found) return found;
-            }
-        }
-        return null;
-    };
-    
-    // Find subfolders of the current folder from the folders data
-    const findSubfolders = (folders, parentId) => {
-        if (!folders || !Array.isArray(folders)) return [];
-        const result = [];
-        for (const folder of folders) {
-            if (folder._id === parentId && folder.children) {
-                return folder.children;
-            }
-            if (folder.children && folder.children.length > 0) {
-                const found = findSubfolders(folder.children, parentId);
-                if (found.length > 0) return found;
-            }
-        }
-        return result;
-    };
-    
-    // Get current folder and parent folder info
-    const currentFolder = findFolderById(foldersData?.folders || [], fileId);
-    const parentFolderId = currentFolder?.parentFolder;
-    const parentFolder = parentFolderId ? findFolderById(foldersData?.folders || [], parentFolderId) : null;
-    
-    const subfolders = findSubfolders(foldersData?.folders || [], fileId);
-    const totalItems = (data?.files?.length || 0) + subfolders.length;
-    
-    // Get back navigation route
-    const getBackRoute = () => {
-        const basePath = location.pathname.includes('/Promoter') 
-            ? '/Promoter/file' 
-            : location.pathname.includes('/Owner')
-            ? '/Owner/file'
-            : '/dashboard/file';
-        
-        if (parentFolder && parentFolderId) {
-            // Navigate to parent folder
-            return `${basePath}/${encodeURIComponent(parentFolder.name)}/${parentFolderId}`;
+    const totalItems = unifiedItems?.length || 0;
+
+    const handleBack = () => {
+        if (window.history.state && window.history.state.idx > 0) {
+            navigate(-1);
         } else {
-            // Navigate to all files
-            return getFilesRoute();
+            navigate(getFilesRoute());
         }
     };
     
@@ -315,7 +267,7 @@ export default function FileDetails() {
                 {/* Back Button */}
                 <div className="mb-4 sm:mb-6">
                     <button
-                        onClick={() => navigate(getBackRoute())}
+                        onClick={handleBack}
                         className="inline-flex items-center px-3 sm:px-4 py-2 text-sm font-medium text-indigo-700 bg-white border border-indigo-300 rounded-lg shadow-sm transition-all duration-200 hover:bg-indigo-50 hover:text-indigo-800 hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
                     >
                         {language === 'ar' ? (
@@ -384,6 +336,14 @@ export default function FileDetails() {
                                     <LuFolderPlus className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
                                     <span className="hidden sm:inline">{t("files.createFolder") || "Create Folder"}</span>
                                     <span className="sm:hidden">{t("files.createFolder") || "Folder"}</span>
+                                </button>
+                                <button
+                                    onClick={() => setShowCreateZipModal(true)}
+                                    className="inline-flex items-center px-3 sm:px-4 py-1.5 sm:py-2 border border-transparent shadow-sm text-xs sm:text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all"
+                                >
+                                    <LuFileArchive className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                                    <span className="hidden sm:inline">{t("filesV2.createZipButton") || "Create ZIP"}</span>
+                                    <span className="sm:hidden">{t("filesV2.createZipShort") || "ZIP"}</span>
                                 </button>
                             </div>
                         </div>
@@ -489,6 +449,7 @@ export default function FileDetails() {
                             }}
                             onRename={ToggleNameChange}
                             onShare={(id, isFolder) => ShareFile(id, isFolder)}
+                            onDisableShare={handleDisableShare}
                             onArchive={async (item) => {
                                 if (item.isFolder || item.itemType === 'folder') {
                                     try {
@@ -508,14 +469,14 @@ export default function FileDetails() {
                                     }
                                 }
                             }}
+                            refetch={refetchFolderData}
                             onOpenItem={(item) => {
                                 if (item.isFolder || item.itemType === 'folder') {
-                                    // Navigate to subfolder
                                     const folderId = item._id || item.id;
                                     const folderName = item.name || item.fileName;
-                                    navigate(`${getFilesRoute()}/${folderName}/${folderId}`);
+                                    if (!folderId || !folderName) return;
+                                    navigate(`${getFolderBasePath()}/${encodeURIComponent(folderName)}/${folderId}`);
                                 } else {
-                                    // Open file preview
                                     const url = item.url || item.accessUrl || item._sharedUrl || item.sharedUrl || item.shareLink;
                                     if (url) {
                                         const fileType = item.fileType || item.type;
@@ -531,24 +492,34 @@ export default function FileDetails() {
 
         <AnimatePresence>
             {showUploadOptions && (
-                <UploadOptions 
-                    key="upload-options" 
+                <UploadOptions
+                    key="upload-options"
                     onClose={ToggleUploadOptions}
                     onSelectDesktop={handleSelectDesktop}
                     onSelectMegaBox={handleSelectMegaBox}
                     isPromoter={isPromoter}
                 />
             )}
-            {AddFileShow && <UploadFile key="upload-file" ToggleUploadFile={ToggleShowAddFile} refetch={refetchFolderData} insideFile={true} id={fileId} />}
-            {showUploadFromMegaBox && (
-                <UploadFromMegaBox 
-                    key="upload-from-megabox" 
-                    ToggleUploadFile={ToggleUploadFromMegaBox} 
-                    refetch={refetchFolderData}
+            {showCopyFromMegaBox && (
+                <UploadFromMegaBox
+                    key="upload-from-megabox"
+                    onClose={() => setShowCopyFromMegaBox(false)}
                     insideFile={true}
                     id={fileId}
+                    refetch={refetchFolderData}
                 />
             )}
+            {showCreateZipModal && (
+                <CreateZipModal
+                    key="create-zip-modal"
+                    open={showCreateZipModal}
+                    onClose={() => setShowCreateZipModal(false)}
+                    folderId={fileId}
+                    availableItems={unifiedItems || []}
+                    refetch={refetchFolderData}
+                />
+            )}
+            {AddFileShow && <UploadFile key="upload-file" ToggleUploadFile={ToggleShowAddFile} refetch={refetchFolderData} insideFile={true} id={fileId} />}
                     {AddFolderAdding && (
                         <AddFolder
                             key="add-folder"

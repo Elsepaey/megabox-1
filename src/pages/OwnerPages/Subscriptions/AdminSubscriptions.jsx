@@ -1,786 +1,1243 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { useQuery } from 'react-query';
-import { useCookies } from 'react-cookie';
-import { useNavigate } from 'react-router-dom';
-// eslint-disable-next-line no-unused-vars
-import { motion, AnimatePresence } from 'framer-motion';
-import { adminService } from '../../../services/adminService';
-import { promoterService } from '../../../services/promoterService';
-import { useLanguage } from '../../../context/LanguageContext';
-import { FaCrown, FaTimes, FaUser, FaPhone, FaCalendar, FaFileInvoice, FaEye, FaExternalLinkAlt } from 'react-icons/fa';
-import { HiArrowRight, HiArrowLeft, HiCurrencyDollar, HiClock } from 'react-icons/hi2';
-import { FiSearch, FiX } from 'react-icons/fi';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useQuery, useQueryClient } from 'react-query';
 import { toast } from 'react-toastify';
+import { FaIdCard, FaPlus } from 'react-icons/fa';
+import { useLanguage } from '../../../context/LanguageContext';
 import { ToastOptions } from '../../../helpers/ToastOptions';
-import Loading from '../../../components/Loading/Loading';
-import Pagination from '../../../components/Pagination/Pagination';
-import SearchFilter from '../../../components/SearchFilter/SearchFilter';
-import './Subscriptions.scss';
+import financeAdmin from '../../../services/admin/financeAdmin';
+import { apiErrorStatus } from '../../../services/admin/adminApi';
+import {
+    AdminModal,
+    AdminPage,
+    AdminTable,
+    AdminTabs,
+    DetailList,
+    FilterBar,
+    ReasonModal,
+    StatusBadge,
+} from '../_shared/AdminUI';
+import useAdminList from '../_shared/useAdminList';
+import useStaffRole from '../_shared/useStaffRole';
+import { formatDate, formatDay, formatNumber, shortId } from '../_shared/formatters';
+
+const STATUS_TONE = {
+    active: 'success',
+    expired: 'neutral',
+    cancelled: 'danger',
+};
+
+const REQUEST_STATUS_TONE = {
+    pending: 'warning',
+    approved: 'success',
+    rejected: 'danger',
+};
+
+const INITIAL_FILTERS = {
+    status: '',
+    planId: '',
+    userId: '',
+};
+
+const INITIAL_REQUEST_FILTERS = {
+    status: 'pending',
+    planId: '',
+    userId: '',
+};
+
+function emptyGrantForm() {
+    return {
+        planId: '',
+        durationDays: '',
+        pricePaid: '',
+        paymentReference: '',
+        reason: '',
+    };
+}
 
 export default function AdminSubscriptions() {
     const { t, language } = useLanguage();
-    const navigate = useNavigate();
-    const [cookies] = useCookies(['MegaBox']);
-    const token = cookies.MegaBox;
-    const [selectedSubscription, setSelectedSubscription] = useState(null);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 10;
+    const queryClient = useQueryClient();
+    const { userId: staffUserId, isOwner } = useStaffRole();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeTab = searchParams.get('tab') === 'requests' ? 'requests' : 'subscriptions';
 
-    // Fetch all subscriptions
-    const { data: subscriptionsData, isLoading: subscriptionsLoading } = useQuery(
-        ['allSubscriptions'],
-        async () => {
-            try {
-                const response = await adminService.getAllSubscriptions(token);
-                let subscriptions = [];
-                if (response.subscriptions && Array.isArray(response.subscriptions)) {
-                    subscriptions = response.subscriptions;
-                } else if (Array.isArray(response)) {
-                    subscriptions = response;
-                } else if (response.data && Array.isArray(response.data)) {
-                    subscriptions = response.data;
-                }
-                return subscriptions;
-            } catch {
-                return [];
-            }
-        },
-        {
-            enabled: !!token,
-            retry: false
-        }
+    const [grantOpen, setGrantOpen] = useState(false);
+    const [searchInput, setSearchInput] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+    const [selectedUser, setSelectedUser] = useState(null);
+    const [grantForm, setGrantForm] = useState(emptyGrantForm);
+    const [grantError, setGrantError] = useState(null);
+    const [granting, setGranting] = useState(false);
+
+    const [revokeTarget, setRevokeTarget] = useState(null);
+    const [detailRow, setDetailRow] = useState(null);
+
+    const [approveTarget, setApproveTarget] = useState(null);
+    const [approveDuration, setApproveDuration] = useState('');
+    const [approveReason, setApproveReason] = useState('');
+    const [approveError, setApproveError] = useState(null);
+    const [approving, setApproving] = useState(false);
+    const [rejectTarget, setRejectTarget] = useState(null);
+    const [requestDetailRow, setRequestDetailRow] = useState(null);
+    useEffect(() => {
+        const id = setTimeout(() => setDebouncedSearch(searchInput.trim()), 350);
+        return () => clearTimeout(id);
+    }, [searchInput]);
+
+    const plansQuery = useQuery(['staff:plans'], financeAdmin.listPlans, {
+        retry: false,
+        refetchOnWindowFocus: false,
+    });
+
+    const allPlans = useMemo(() => plansQuery.data?.plans ?? [], [plansQuery.data]);
+    const activePaidPlans = useMemo(
+        () => allPlans.filter((p) => p.is_active && p.type !== 'free'),
+        [allPlans],
     );
 
-    const [enrichedSubscription, setEnrichedSubscription] = useState(null);
+    const list = useAdminList('staff:subscriptions', financeAdmin.listSubscriptions, {
+        initialFilters: INITIAL_FILTERS,
+        limit: 20,
+        enabled: activeTab === 'subscriptions',
+    });
 
-    useEffect(() => {
-        if (selectedSubscription) {
-            // Try to fetch user data if email is missing and we have a userId
-            const userId = selectedSubscription.userId?._id || 
-                          selectedSubscription.userId?.id || 
-                          selectedSubscription.userId ||
-                          selectedSubscription.promoterId?._id ||
-                          selectedSubscription.promoterId?.id ||
-                          selectedSubscription.promoterId;
-
-            if (userId && !selectedSubscription.email && !selectedSubscription.userId?.email) {
-                // Fetch user data to get email
-                adminService.getAllUsers(token)
-                    .then(response => {
-                        const users = response?.users || response?.data?.users || response || [];
-                        const user = users.find(u => 
-                            (u._id || u.id) === userId || 
-                            String(u._id || u.id) === String(userId)
-                        );
-                        if (user) {
-                            setEnrichedSubscription({
-                                ...selectedSubscription,
-                                email: user.email || selectedSubscription.email,
-                                userId: {
-                                    ...selectedSubscription.userId,
-                                    email: user.email
-                                }
-                            });
-                        } else {
-                            setEnrichedSubscription(selectedSubscription);
-                        }
-                    })
-                    .catch(() => {
-                        setEnrichedSubscription(selectedSubscription);
-                    });
-            } else {
-                setEnrichedSubscription(selectedSubscription);
-            }
+    const requestsList = useAdminList(
+        'staff:subscription-requests',
+        financeAdmin.listSubscriptionRequests,
+        {
+            initialFilters: INITIAL_REQUEST_FILTERS,
+            defaultFilters: { status: '', planId: '', userId: '' },
+            limit: 20,
+            enabled: activeTab === 'requests',
+        },
+    );
+    const handleTabChange = (tab) => {
+        const next = new URLSearchParams(searchParams);
+        if (tab === 'requests') {
+            next.set('tab', 'requests');
         } else {
-            setEnrichedSubscription(null);
+            next.delete('tab');
         }
-    }, [selectedSubscription, token]);
+        setSearchParams(next, { replace: true });
+    };
+    const userSearchQuery = useQuery(
+        ['staff:subscriptions:userSearch', debouncedSearch],
+        () => financeAdmin.searchUsers(debouncedSearch, 10),
+        {
+            enabled: grantOpen && !selectedUser && debouncedSearch.length >= 2,
+            retry: false,
+            refetchOnWindowFocus: false,
+        },
+    );
 
-    // Filter subscriptions - exclude premium users/promoters
-    const filteredSubscriptions = useMemo(() => {
-        if (!subscriptionsData) return [];
-        
-        return subscriptionsData.filter((sub) => {
-            // Check if user/promoter has premium status (isBrimume: true)
-            // Check multiple possible locations for premium status
-            const isPremium = sub.isBrimume === true || sub.isBrimume === "true" ||
-                            sub.userId?.isBrimume === true || sub.userId?.isBrimume === "true" ||
-                            sub.createdBy?.isBrimume === true || sub.createdBy?.isBrimume === "true" ||
-                            sub.promoterId?.isBrimume === true || sub.promoterId?.isBrimume === "true" ||
-                            sub.promoter?.isBrimume === true || sub.promoter?.isBrimume === "true" ||
-                            sub.user?.isBrimume === true || sub.user?.isBrimume === "true" ||
-                            sub.subscriberId?.isBrimume === true || sub.subscriberId?.isBrimume === "true" ||
-                            sub.subscriber?.isBrimume === true || sub.subscriber?.isBrimume === "true";
-            
-            // Filter out premium users/promoters
-            if (isPremium) {
-                return false;
-            }
-            
-            // Apply search filter
-            if (searchTerm) {
-                const searchLower = searchTerm.toLowerCase();
-                const subscriberName = (sub.subscriberName || sub.name || '').toLowerCase();
-                const planName = (sub.planName || sub.plan?.name || '').toLowerCase();
-                const phone = (sub.phone || '').toLowerCase();
-                
-                if (!subscriberName.includes(searchLower) &&
-                    !planName.includes(searchLower) &&
-                    !phone.includes(searchLower)) {
-                    return false;
-                }
-            }
-            return true;
+    const canManageUser = (targetUser, targetUserId) => {
+        if (
+            staffUserId &&
+            targetUserId &&
+            String(targetUserId).toLowerCase() === String(staffUserId).toLowerCase()
+        ) {
+            return false;
+        }
+        if (targetUser?.isDeleted) return false;
+        const role = targetUser?.role ?? 'User';
+        if (role === 'Owner') return false;
+        if (role === 'Admin' && !isOwner) return false;
+        return true;
+    };
+
+    const searchResults = (userSearchQuery.data?.data ?? []).filter((u) =>
+        canManageUser(u, u._id),
+    );
+
+    const selectedPlan = useMemo(
+        () => activePaidPlans.find((p) => p._id === grantForm.planId) || null,
+        [activePaidPlans, grantForm.planId],
+    );
+
+    const statusLabel = (status) => {
+        const map = {
+            active: t('staffSubscriptions.statusActive'),
+            expired: t('staffSubscriptions.statusExpired'),
+            cancelled: t('staffSubscriptions.statusCancelled'),
+        };
+        return map[status] || status || '—';
+    };
+
+    const requestStatusLabel = (status) => {
+        const map = {
+            pending: t('staffSubscriptions.requestStatusPending'),
+            approved: t('staffSubscriptions.requestStatusApproved'),
+            rejected: t('staffSubscriptions.requestStatusRejected'),
+        };
+        return map[status] || status || '—';
+    };
+
+    const userLabel = (row) => {
+        if (row?.user) return row.user.username || row.user.email || shortId(row.user._id);
+        return shortId(row?.userId);
+    };
+
+    const userIdOf = (row) => row?.user?._id || row?.userId;
+
+    const openGrantModal = () => {
+        setSearchInput('');
+        setDebouncedSearch('');
+        setSelectedUser(null);
+        setGrantForm({
+            ...emptyGrantForm(),
+            planId: activePaidPlans[0]?._id || '',
         });
-    }, [subscriptionsData, searchTerm]);
-
-    // Pagination logic
-    const totalPages = Math.ceil(filteredSubscriptions.length / itemsPerPage);
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedSubscriptions = filteredSubscriptions.slice(startIndex, endIndex);
-
-    // Reset to page 1 when search changes
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm]);
-
-    const formatDate = (dateString) => {
-        if (!dateString) return '-';
-        try {
-            const date = new Date(dateString);
-            return date.toLocaleDateString();
-        } catch {
-            return dateString;
-        }
+        setGrantError(null);
+        setGrantOpen(true);
     };
 
-    const handleViewDetails = (subscription) => {
-        setSelectedSubscription(subscription);
+    const closeGrantModal = () => {
+        if (granting) return;
+        setGrantOpen(false);
+        setGrantError(null);
     };
 
-    // Check if user is a promoter by watchingplan or Downloadsplan
-    const isPromoter = (user) => {
-        if (!user) return false;
-        const watchingPlan = user.watchingplan === true || user.watchingplan === "true";
-        const downloadsPlan = user.Downloadsplan === true || user.Downloadsplan === "true";
-        return watchingPlan || downloadsPlan;
-    };
-
-    // Navigate to user or promoter page
-    const handleNavigateToUser = async (subscription) => {
-        if (!subscription) return;
-
-        let userId = getUserIdFromSubscription(subscription);
-        let userEmail = subscription.email || subscription.userId?.email || subscription.createdBy?.email;
-        let searchValue = userEmail || subscription.phone || userId;
-        let foundUser = null;
-        let foundPromoter = null;
-        
-        // First, check if subscription data itself indicates promoter status
-        const subscriptionUser = subscription.userId || subscription.createdBy || subscription.promoter || subscription.user;
-        if (subscriptionUser && isPromoter(subscriptionUser)) {
-            userId = subscriptionUser._id || subscriptionUser.id || userId;
-            if (userId) {
-                navigate(`/Owner/AllPromoters?search=${encodeURIComponent(searchValue || userId)}`);
-                return;
-            }
+    const handleGrantSubmit = async (event) => {
+        event.preventDefault();
+        if (!selectedUser?._id) {
+            setGrantError(t('staffSubscriptions.validationUser'));
+            return;
         }
-
-        // If we have userId, check promoters first, then users
-        if (userId) {
-            try {
-                // Check promoters first
-                const promotersResponse = await promoterService.getAllPromoters(token);
-                const promoters = Array.isArray(promotersResponse) 
-                    ? promotersResponse 
-                    : (promotersResponse?.promoters || promotersResponse?.data?.promoters || []);
-                
-                foundPromoter = promoters.find(p => 
-                    String(p._id || p.id) === String(userId)
-                );
-
-                if (foundPromoter) {
-                    navigate(`/Owner/AllPromoters?search=${encodeURIComponent(searchValue || userId)}`);
-                    return;
-                }
-
-                // If not found in promoters, check users
-                const usersResponse = await adminService.getAllUsers(token);
-                const users = Array.isArray(usersResponse) 
-                    ? usersResponse 
-                    : (usersResponse?.users || usersResponse?.data?.users || []);
-                
-                foundUser = users.find(u => 
-                    String(u._id || u.id) === String(userId)
-                );
-
-                if (foundUser) {
-                    navigate(`/Owner/Users?search=${encodeURIComponent(searchValue || userId)}`);
-                    return;
-                }
-            } catch (error) {
-                console.error('Error checking user/promoter:', error);
-            }
-        }
-
-        // If no user ID or user not found, try to find by email or phone
-        if (!userId || (!foundUser && !foundPromoter)) {
-            if (userEmail) {
-                try {
-                    // Check promoters first by searching
-                    const promotersResponse = await promoterService.getAllPromoters(token);
-                    const promoters = Array.isArray(promotersResponse) 
-                        ? promotersResponse 
-                        : (promotersResponse?.promoters || promotersResponse?.data?.promoters || []);
-                    
-                    foundPromoter = promoters.find(p => 
-                        (p.email && p.email.toLowerCase() === userEmail.toLowerCase()) ||
-                        (p.username && p.username.toLowerCase() === userEmail.toLowerCase())
-                    );
-
-                    if (foundPromoter) {
-                        navigate(`/Owner/AllPromoters?search=${encodeURIComponent(userEmail)}`);
-                        return;
-                    }
-
-                    // If not found in promoters, check users
-                    const result = await adminService.searchUser(userEmail, token);
-                    foundUser = result?.user || result;
-                    userId = foundUser?._id || foundUser?.id || userId;
-                    
-                    if (foundUser) {
-                        navigate(`/Owner/Users?search=${encodeURIComponent(userEmail)}`);
-                        return;
-                    }
-                } catch (error) {
-                    console.error('Error searching by email:', error);
-                    // If search fails, try phone
-                    if (subscription.phone) {
-                        userId = await findUserByPhone(subscription.phone);
-                        if (userId) {
-                            // Check promoters first
-                            try {
-                                const promotersResponse = await promoterService.getAllPromoters(token);
-                                const promoters = Array.isArray(promotersResponse) 
-                                    ? promotersResponse 
-                                    : (promotersResponse?.promoters || promotersResponse?.data?.promoters || []);
-                                
-                                foundPromoter = promoters.find(p => 
-                                    String(p._id || p.id) === String(userId)
-                                );
-
-                                if (foundPromoter) {
-                                    navigate(`/Owner/AllPromoters?search=${encodeURIComponent(subscription.phone)}`);
-                                    return;
-                                }
-
-                                // Check users
-                                const usersResponse = await adminService.getAllUsers(token);
-                                const users = Array.isArray(usersResponse) 
-                                    ? usersResponse 
-                                    : (usersResponse?.users || usersResponse?.data?.users || []);
-                                
-                                foundUser = users.find(u => 
-                                    String(u._id || u.id) === String(userId)
-                                );
-
-                                if (foundUser) {
-                                    navigate(`/Owner/Users?search=${encodeURIComponent(subscription.phone)}`);
-                                    return;
-                                }
-                            } catch {
-                                // Fall through to error
-                            }
-                        }
-                    }
-                }
-            } else if (subscription.phone) {
-                userId = await findUserByPhone(subscription.phone);
-                if (userId) {
-                    // Check promoters first
-                    try {
-                        const promotersResponse = await promoterService.getAllPromoters(token);
-                        const promoters = Array.isArray(promotersResponse) 
-                            ? promotersResponse 
-                            : (promotersResponse?.promoters || promotersResponse?.data?.promoters || []);
-                        
-                        foundPromoter = promoters.find(p => 
-                            String(p._id || p.id) === String(userId)
-                        );
-
-                        if (foundPromoter) {
-                            navigate(`/Owner/AllPromoters?search=${encodeURIComponent(subscription.phone)}`);
-                            return;
-                        }
-
-                        // Check users
-                        const usersResponse = await adminService.getAllUsers(token);
-                        const users = Array.isArray(usersResponse) 
-                            ? usersResponse 
-                            : (usersResponse?.users || usersResponse?.data?.users || []);
-                        
-                        foundUser = users.find(u => 
-                            String(u._id || u.id) === String(userId)
-                        );
-
-                        if (foundUser) {
-                            navigate(`/Owner/Users?search=${encodeURIComponent(subscription.phone)}`);
-                            return;
-                        }
-                    } catch {
-                        // Fall through to error
-                    }
-                }
-            }
-        }
-
-        if (!userId || (!foundUser && !foundPromoter)) {
-            toast.error(
-                t('adminSubscriptions.userNotFound') || 
-                'User not found. Cannot navigate to user page.',
-                ToastOptions("error")
-            );
+        if (!grantForm.planId) {
+            setGrantError(t('staffSubscriptions.validationPlan'));
             return;
         }
 
-        // Final check - if we found a promoter, go to promoters page
-        if (foundPromoter) {
-            navigate(`/Owner/AllPromoters?search=${encodeURIComponent(searchValue || userId)}`);
-        } else if (foundUser) {
-            navigate(`/Owner/Users?search=${encodeURIComponent(searchValue || userId)}`);
-        }
-    };
+        const payload = { planId: grantForm.planId };
 
-    // Get user ID from subscription
-    const getUserIdFromSubscription = (subscription) => {
-        if (!subscription) return null;
-        
-        // Try to extract ID from various possible locations
-        // Check direct ID fields first
-        let userId = subscription.userId?._id || subscription.userId?.id || subscription.userId ||
-                     subscription.promoterId?._id || subscription.promoterId?.id || subscription.promoterId ||
-                     subscription.createdBy?._id || subscription.createdBy?.id || subscription.createdBy ||
-                     subscription.promoter?._id || subscription.promoter?.id || subscription.promoter ||
-                     subscription.user?._id || subscription.user?.id || subscription.user ||
-                     subscription.subscriber?._id || subscription.subscriber?.id || subscription.subscriber ||
-                     subscription.subscriberId?._id || subscription.subscriberId?.id || subscription.subscriberId;
-        
-        // If still not found, check if subscription itself has an _id that might be the user ID
-        // (though this is less likely, it's a fallback)
-        if (!userId && subscription._id) {
-            // Only use subscription._id if it's clearly a user ID (not a subscription ID)
-            // This is a last resort and might not be correct
-        }
-        
-        // Ensure we return a string, not an object
-        if (!userId) return null;
-        
-        // If userId is an object, try to extract _id or id from it
-        if (typeof userId === 'object' && userId !== null) {
-            const extractedId = userId._id || userId.id;
-            if (extractedId) {
-                return String(extractedId);
+        if (grantForm.durationDays !== '') {
+            const durationDays = Number(grantForm.durationDays);
+            if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 36500) {
+                setGrantError(t('staffSubscriptions.validationDuration'));
+                return;
             }
-            return null;
+            payload.durationDays = durationDays;
         }
-        
-        // Convert to string to ensure it's not an ObjectId or other type
-        return String(userId);
-    };
 
-    // Find user by phone number
-    const findUserByPhone = async (phone) => {
-        if (!phone) return null;
-        
+        if (grantForm.pricePaid !== '') {
+            const pricePaid = Number(grantForm.pricePaid);
+            if (Number.isNaN(pricePaid) || pricePaid < 0) {
+                setGrantError(t('staffSubscriptions.validationPrice'));
+                return;
+            }
+            payload.pricePaid = pricePaid;
+        }
+
+        const ref = grantForm.paymentReference.trim();
+        if (ref.length > 200) {
+            setGrantError(t('staffSubscriptions.validationReference'));
+            return;
+        }
+        if (ref) {
+            payload.paymentReference = ref;
+        }
+
+        const reason = grantForm.reason.trim();
+        if (reason.length < 1 || reason.length > 500) {
+            setGrantError(t('staffSubscriptions.validationReason'));
+            return;
+        }
+        payload.reason = reason;
+
+        setGrantError(null);
+        setGranting(true);
         try {
-            const response = await adminService.getAllUsers(token);
-            const users = response?.users || response?.data?.users || response || [];
-            
-            // Search for user by phone number
-            const user = users.find(u => {
-                const userPhone = u.phone || u.phoneNumber || '';
-                // Remove any formatting (spaces, dashes, etc.) for comparison
-                const normalizedPhone = phone.replace(/[\s\-()]/g, '');
-                const normalizedUserPhone = userPhone.replace(/[\s\-()]/g, '');
-                return normalizedUserPhone === normalizedPhone || 
-                       normalizedUserPhone.endsWith(normalizedPhone) ||
-                       normalizedPhone.endsWith(normalizedUserPhone);
-            });
-            
-            if (user) {
-                return user._id || user.id || null;
+            await financeAdmin.grantSubscription(selectedUser._id, payload);
+            toast.success(t('staffSubscriptions.grantSuccess'), ToastOptions('success'));
+            setGrantOpen(false);
+            queryClient.invalidateQueries('staff:subscriptions');
+        } catch (error) {
+            if (apiErrorStatus(error) === 409) {
+                toast.info(t('staffCommon.conflictReload'), ToastOptions('info'));
+                setGrantOpen(false);
+                queryClient.invalidateQueries('staff:subscriptions');
             }
-            return null;
-        } catch {
-            return null;
+        } finally {
+            setGranting(false);
         }
     };
 
+    const handleRevokeConfirm = async (reason) => {
+        if (!revokeTarget) return;
+        const uid = userIdOf(revokeTarget);
+        if (!uid) return;
+        try {
+            await financeAdmin.revokeSubscription(uid, { reason });
+            toast.success(t('staffSubscriptions.revokeSuccess'), ToastOptions('success'));
+            setRevokeTarget(null);
+            queryClient.invalidateQueries('staff:subscriptions');
+        } catch (error) {
+            if (apiErrorStatus(error) === 409) {
+                toast.info(t('staffCommon.conflictReload'), ToastOptions('info'));
+                setRevokeTarget(null);
+                queryClient.invalidateQueries('staff:subscriptions');
+                return;
+            }
+            throw error;
+        }
+    };
 
-    return (
-        <div className="admin-subscriptions-page">
-            <div className="admin-subscriptions-page__wrapper">
-                <div className="admin-subscriptions-header">
-                    <div className="admin-subscriptions-header__content">
-                        <button
-                            onClick={() => navigate('/Owner')}
-                            className="admin-subscriptions-header__back"
-                            title={t('adminSubscriptions.backToAnalytics')}
-                        >
-                            {language === 'ar' ? <HiArrowRight size={24} /> : <HiArrowLeft size={24} />}
-                        </button>
-                        <FaCrown className="admin-subscriptions-header__icon" />
-                        <div>
-                            <h1 className="admin-subscriptions-header__title">{t('adminSubscriptions.title') || 'Subscriptions Management'}</h1>
-                            <p className="admin-subscriptions-header__subtitle">{t('adminSubscriptions.subtitle') || 'View and manage all subscriptions'}</p>
-                        </div>
-                    </div>
-                </div>
+    const openApproveModal = (row) => {
+        setApproveTarget(row);
+        setApproveDuration('');
+        setApproveReason('');
+        setApproveError(null);
+    };
 
-                {/* Search */}
-                <div className="admin-subscriptions-search">
-                    <div className="admin-subscriptions-search__wrapper">
-                        <FiSearch className="admin-subscriptions-search__icon" />
-                        <input
-                            type="text"
-                            placeholder={t('adminSubscriptions.searchSubscriptions') || 'Search by subscriber, plan, or phone...'}
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="admin-subscriptions-search__input"
-                        />
-                        {searchTerm && (
-                            <button
-                                type="button"
-                                onClick={() => setSearchTerm('')}
-                                className="admin-subscriptions-search__clear"
-                                title={t('adminSubscriptions.clearSearch') || 'Clear search'}
-                            >
-                                <FiX />
-                            </button>
+    const closeApproveModal = () => {
+        if (approving) return;
+        setApproveTarget(null);
+        setApproveError(null);
+    };
+
+    const handleApproveSubmit = async (event) => {
+        event.preventDefault();
+        if (!approveTarget) return;
+
+        const payload = {};
+        if (approveDuration !== '') {
+            const durationDays = Number(approveDuration);
+            if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 36500) {
+                setApproveError(t('staffSubscriptions.validationDuration'));
+                return;
+            }
+            payload.durationDays = durationDays;
+        }
+
+        const reason = approveReason.trim();
+        if (reason.length < 1 || reason.length > 500) {
+            setApproveError(t('staffSubscriptions.validationReason'));
+            return;
+        }
+        payload.reason = reason;
+
+        setApproveError(null);
+        setApproving(true);
+        try {
+            await financeAdmin.approveSubscriptionRequest(approveTarget._id, payload);
+            toast.success(t('staffSubscriptions.approveSuccess'), ToastOptions('success'));
+            setApproveTarget(null);
+            queryClient.invalidateQueries('staff:subscription-requests');
+            queryClient.invalidateQueries('staff:subscriptions');
+        } catch (error) {
+            if (apiErrorStatus(error) === 409) {
+                toast.info(t('staffCommon.conflictReload'), ToastOptions('info'));
+                setApproveTarget(null);
+                queryClient.invalidateQueries('staff:subscription-requests');
+                queryClient.invalidateQueries('staff:subscriptions');
+            }
+        } finally {
+            setApproving(false);
+        }
+    };
+
+    const handleRejectConfirm = async (reason) => {
+        if (!rejectTarget) return;
+        try {
+            await financeAdmin.rejectSubscriptionRequest(rejectTarget._id, { reason });
+            toast.success(t('staffSubscriptions.rejectSuccess'), ToastOptions('success'));
+            setRejectTarget(null);
+            queryClient.invalidateQueries('staff:subscription-requests');
+        } catch (error) {
+            if (apiErrorStatus(error) === 409) {
+                toast.info(t('staffCommon.conflictReload'), ToastOptions('info'));
+                setRejectTarget(null);
+                queryClient.invalidateQueries('staff:subscription-requests');
+                return;
+            }
+            throw error;
+        }
+    };
+
+    const filterFields = [
+        {
+            key: 'status',
+            label: t('staffCommon.status'),
+            type: 'select',
+            options: [
+                { value: 'active', label: t('staffSubscriptions.statusActive') },
+                { value: 'expired', label: t('staffSubscriptions.statusExpired') },
+                { value: 'cancelled', label: t('staffSubscriptions.statusCancelled') },
+            ],
+        },
+        {
+            key: 'planId',
+            label: t('staffSubscriptions.plan'),
+            type: 'select',
+            options: allPlans.map((p) => ({ value: p._id, label: p.name })),
+        },
+        {
+            key: 'userId',
+            label: t('staffSubscriptions.userId'),
+            type: 'text',
+        },
+    ];
+
+    const columns = [
+        {
+            key: 'user',
+            header: t('staffCommon.user'),
+            render: (row) => {
+                const uid = userIdOf(row);
+                return (
+                    <div>
+                        {uid ? (
+                            <Link to={`/Owner/Users/${uid}`} style={{ fontWeight: 600 }}>
+                                {userLabel(row)}
+                            </Link>
+                        ) : (
+                            '—'
+                        )}
+                        {row.user?.email && (
+                            <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                                {row.user.email}
+                            </div>
                         )}
                     </div>
-                </div>
-
-                {subscriptionsLoading ? (
-                    <div className="admin-subscriptions-loading">
-                        <Loading />
+                );
+            },
+        },
+        {
+            key: 'plan',
+            header: t('staffSubscriptions.plan'),
+            render: (row) =>
+                row.plan ? (
+                    <div>
+                        <strong>{row.plan.name}</strong>
+                        {row.plan.type && (
+                            <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                                {row.plan.type}
+                            </div>
+                        )}
                     </div>
-                ) : filteredSubscriptions.length > 0 ? (
-                    <>
-                        <div className="admin-subscriptions-table-wrapper">
-                            <table className="admin-users-table">
-                                <thead className="admin-users-table__header">
-                                    <tr>
-                                        <th scope="col" className="px-6 py-3">{t("adminSubscriptions.subscriberName") || "Subscriber"}</th>
-                                        <th scope="col" className="px-6 py-3">{t("adminSubscriptions.phone") || "Phone"}</th>
-                                        <th scope="col" className="px-6 py-3">{t("adminSubscriptions.planName") || "Plan"}</th>
-                                        <th scope="col" className="px-6 py-3">{t("adminSubscriptions.duration") || "Duration"}</th>
-                                        <th scope="col" className="px-6 py-3">{t("adminSubscriptions.premiumStatus") || "Premium Status"}</th>
-                                        <th scope="col" className="px-6 py-3">{t("adminSubscriptions.createdAt") || "Created At"}</th>
-                                        <th scope="col" className="px-6 py-3">{t("adminSubscriptions.actions") || "Actions"}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {paginatedSubscriptions.map((subscription, index) => (
-                                    <tr 
-                                        key={subscription._id || subscription.id || index}
-                                        className="bg-white border-b hover:bg-gray-50"
-                                    >
-                                        <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap" data-label={t("adminSubscriptions.subscriberName") || "Subscriber"}>
-                                            <div className="flex items-center gap-2">
-                                                <FaUser className="text-indigo-600" size={16} />
-                                                <button
-                                                    onClick={() => handleNavigateToUser(subscription)}
-                                                    className="text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-1"
-                                                    title={t("adminSubscriptions.goToUser") || "Go to User/Promoter Page"}
-                                                >
-                                                    <span>{subscription.subscriberName || subscription.name || '-'}</span>
-                                                    <FaExternalLinkAlt size={12} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4" data-label={t("adminSubscriptions.phone") || "Phone"}>
-                                            <div className="flex items-center gap-2">
-                                                <FaPhone className="text-gray-400" size={14} />
-                                                <button
-                                                    onClick={() => handleNavigateToUser(subscription)}
-                                                    className="text-gray-600 hover:text-indigo-600 hover:underline flex items-center gap-1"
-                                                    title={t("adminSubscriptions.goToUser") || "Go to User/Promoter Page"}
-                                                >
-                                                    <span>{subscription.phone || '-'}</span>
-                                                    <FaExternalLinkAlt size={12} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4" data-label={t("adminSubscriptions.planName") || "Plan"}>
-                                            <span className="font-medium text-indigo-600">
-                                                {subscription.planName || subscription.plan?.name || '-'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4" data-label={t("adminSubscriptions.duration") || "Duration"}>
-                                            <div className="flex items-center gap-2">
-                                                <HiClock className="text-gray-400" size={14} />
-                                                <span>{subscription.durationDays || subscription.days || '-'} {t('adminSubscriptions.days') || 'days'}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4" data-label={t("adminSubscriptions.premiumStatus") || "Premium Status"}>
-                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${subscription.isBrimume || subscription.userId?.isBrimume || subscription.createdBy?.isBrimume ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
-                                                {subscription.isBrimume || subscription.userId?.isBrimume || subscription.createdBy?.isBrimume ? 'true' : 'false'}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4" data-label={t("adminSubscriptions.createdAt") || "Created At"}>
-                                            <div className="flex items-center gap-2">
-                                                <FaCalendar className="text-gray-400" size={14} />
-                                                <span>{formatDate(subscription.createdAt || subscription.created)}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4" data-label={t("adminSubscriptions.actions") || "Actions"}>
-                                            <div className="action-buttons">
-                                                <button
-                                                    onClick={() => handleViewDetails(subscription)}
-                                                    className="action-buttons__view-btn"
-                                                    title={t("adminSubscriptions.viewDetails") || "View Details"}
-                                                >
-                                                    <FaEye size={20} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Pagination */}
-                        <Pagination
-                            currentPage={currentPage}
-                            totalPages={totalPages}
-                            onPageChange={setCurrentPage}
-                            showCount={true}
-                            startIndex={startIndex}
-                            endIndex={Math.min(endIndex, filteredSubscriptions.length)}
-                            totalItems={filteredSubscriptions.length}
-                            itemsLabel={t('adminSubscriptions.subscriptions') || 'subscriptions'}
-                        />
-                    </>
                 ) : (
-                    <div className="admin-subscriptions-empty">
-                        <p>{t('adminSubscriptions.noSubscriptions') || 'No subscriptions found'}</p>
-                    </div>
-                )}
-            </div>
-
-            {/* Subscription Details Modal */}
-            <AnimatePresence>
-                {selectedSubscription && (
-                    <motion.div
-                        className="admin-subscription-details-modal-backdrop"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        onClick={() => setSelectedSubscription(null)}
+                    shortId(row.planId)
+                ),
+        },
+        {
+            key: 'status',
+            header: t('staffCommon.status'),
+            render: (row) => (
+                <StatusBadge tone={STATUS_TONE[row.status] || 'neutral'}>
+                    {statusLabel(row.status)}
+                </StatusBadge>
+            ),
+        },
+        {
+            key: 'period',
+            header: t('staffSubscriptions.period'),
+            render: (row) =>
+                `${formatDay(row.startDate, language)} → ${formatDay(row.endDate, language)}`,
+        },
+        {
+            key: 'pricePaid',
+            header: t('staffSubscriptions.pricePaid'),
+            render: (row) =>
+                row.pricePaid !== undefined && row.pricePaid !== null
+                    ? formatNumber(row.pricePaid, language)
+                    : '—',
+        },
+        {
+            key: 'paymentReference',
+            header: t('staffSubscriptions.paymentReference'),
+            render: (row) => row.paymentReference || '—',
+        },
+        {
+            key: 'createdAt',
+            header: t('staffCommon.createdAt'),
+            render: (row) => formatDate(row.createdAt, language),
+        },
+        {
+            key: 'actions',
+            header: t('staffCommon.actions'),
+            render: (row) => (
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        onClick={() => setDetailRow(row)}
                     >
-                        <motion.div
-                            className="admin-subscription-details-modal"
-                            initial={{ scale: 0.95, y: 20 }}
-                            animate={{ scale: 1, y: 0 }}
-                            exit={{ scale: 0.95, y: 20 }}
-                            onClick={(e) => e.stopPropagation()}
+                        {t('staffCommon.view')}
+                    </button>
+                    {row.status === 'active' && canManageUser(row.user, userIdOf(row)) && (
+                        <button
+                            type="button"
+                            className="admin-btn admin-btn--danger admin-btn--sm"
+                            onClick={() => setRevokeTarget(row)}
                         >
-                            <div className="admin-subscription-details-modal__header">
-                                <h2>{t('adminSubscriptions.subscriptionDetails') || 'Subscription Details'}</h2>
+                            {t('staffSubscriptions.revoke')}
+                        </button>
+                    )}
+                </div>
+            ),
+        },
+    ];
+
+    const requestFilterFields = [
+        {
+            key: 'status',
+            label: t('staffCommon.status'),
+            type: 'select',
+            options: [
+                { value: 'pending', label: t('staffSubscriptions.requestStatusPending') },
+                { value: 'approved', label: t('staffSubscriptions.requestStatusApproved') },
+                { value: 'rejected', label: t('staffSubscriptions.requestStatusRejected') },
+            ],
+        },
+        {
+            key: 'planId',
+            label: t('staffSubscriptions.plan'),
+            type: 'select',
+            options: allPlans.map((p) => ({ value: p._id, label: p.name })),
+        },
+        {
+            key: 'userId',
+            label: t('staffSubscriptions.userId'),
+            type: 'text',
+        },
+    ];
+
+    const requestColumns = [
+        {
+            key: 'user',
+            header: t('staffCommon.user'),
+            render: (row) => {
+                const uid = userIdOf(row);
+                return (
+                    <div>
+                        {uid ? (
+                            <Link to={`/Owner/Users/${uid}`} style={{ fontWeight: 600 }}>
+                                {userLabel(row)}
+                            </Link>
+                        ) : (
+                            '—'
+                        )}
+                        {row.user?.email && (
+                            <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                                {row.user.email}
+                            </div>
+                        )}
+                    </div>
+                );
+            },
+        },
+        {
+            key: 'plan',
+            header: t('staffSubscriptions.plan'),
+            render: (row) =>
+                row.plan ? (
+                    <div>
+                        <strong>{row.plan.name}</strong>
+                        <div style={{ fontSize: '0.75rem', opacity: 0.7 }}>
+                            {row.plan.type}
+                            {row.plan.price !== undefined && row.plan.price !== null
+                                ? ` · ${formatNumber(row.plan.price, language)}`
+                                : ''}
+                        </div>
+                    </div>
+                ) : (
+                    shortId(row.planId)
+                ),
+        },
+        {
+            key: 'status',
+            header: t('staffCommon.status'),
+            render: (row) => (
+                <StatusBadge tone={REQUEST_STATUS_TONE[row.status] || 'neutral'}>
+                    {requestStatusLabel(row.status)}
+                </StatusBadge>
+            ),
+        },
+        {
+            key: 'paymentReference',
+            header: t('staffSubscriptions.paymentReference'),
+            render: (row) => row.paymentReference || '—',
+        },
+        {
+            key: 'invoiceUrl',
+            header: t('staffSubscriptions.invoice'),
+            render: (row) =>
+                row.invoiceUrl ? (
+                    <a
+                        href={row.invoiceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="admin-btn admin-btn--ghost admin-btn--sm"
+                    >
+                        {t('staffSubscriptions.viewInvoice')}
+                    </a>
+                ) : (
+                    '—'
+                ),
+        },
+        {
+            key: 'createdAt',
+            header: t('staffCommon.createdAt'),
+            render: (row) => formatDate(row.createdAt, language),
+        },
+        {
+            key: 'actions',
+            header: t('staffCommon.actions'),
+            render: (row) => (
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        onClick={() => setRequestDetailRow(row)}
+                    >
+                        {t('staffCommon.view')}
+                    </button>
+                    {row.status === 'pending' && canManageUser(row.user, userIdOf(row)) && (
+                        <>
+                            <button
+                                type="button"
+                                className="admin-btn admin-btn--primary admin-btn--sm"
+                                onClick={() => openApproveModal(row)}
+                            >
+                                {t('staffSubscriptions.approve')}
+                            </button>
+                            <button
+                                type="button"
+                                className="admin-btn admin-btn--danger admin-btn--sm"
+                                onClick={() => setRejectTarget(row)}
+                            >
+                                {t('staffSubscriptions.reject')}
+                            </button>
+                        </>
+                    )}
+                </div>
+            ),
+        },
+    ];
+
+    const tabs = [
+        { key: 'subscriptions', label: t('staffSubscriptions.tabSubscriptions') },
+        { key: 'requests', label: t('staffSubscriptions.tabRequests') },
+    ];
+
+    return (
+        <AdminPage
+            icon={FaIdCard}
+            title={t('staffSubscriptions.title')}
+            subtitle={t('staffSubscriptions.subtitle')}
+            actions={
+                <button
+                    type="button"
+                    className="admin-btn admin-btn--primary"
+                    onClick={openGrantModal}
+                >
+                    <FaPlus /> {t('staffSubscriptions.grantPremium')}
+                </button>
+            }
+        >
+            <AdminTabs tabs={tabs} active={activeTab} onChange={handleTabChange} />
+
+            {activeTab === 'subscriptions' ? (
+                <>
+                    <FilterBar
+                        fields={filterFields}
+                        values={list.filters}
+                        onChange={list.setFilter}
+                        onReset={list.resetFilters}
+                    />
+
+                    <AdminTable
+                        title={t('staffSubscriptions.title')}
+                        columns={columns}
+                        rows={list.rows}
+                        rowKey="_id"
+                        loading={list.isLoading}
+                        error={list.error}
+                        onRetry={list.refetch}
+                        meta={list.meta}
+                        onPageChange={list.setPage}
+                    />
+                </>
+            ) : (
+                <>
+                    <FilterBar
+                        fields={requestFilterFields}
+                        values={requestsList.filters}
+                        onChange={requestsList.setFilter}
+                        onReset={requestsList.resetFilters}
+                    />
+
+                    <AdminTable
+                        title={t('staffSubscriptions.requestsTitle')}
+                        columns={requestColumns}
+                        rows={requestsList.rows}
+                        rowKey="_id"
+                        loading={requestsList.isLoading}
+                        error={requestsList.error}
+                        onRetry={requestsList.refetch}
+                        emptyMessage={t('staffSubscriptions.noRequests')}
+                        meta={requestsList.meta}
+                        onPageChange={requestsList.setPage}
+                    />
+                </>
+            )}
+
+            <AdminModal
+                open={grantOpen}
+                title={t('staffSubscriptions.grantPremium')}
+                size="lg"
+                onClose={closeGrantModal}
+            >
+                <form className="admin-form" onSubmit={handleGrantSubmit}>
+                    <div className="admin-field">
+                        <span className="admin-field__label">
+                            {selectedUser
+                                ? t('staffSubscriptions.selectedUser')
+                                : t('staffSubscriptions.searchUser')}
+                        </span>
+                        {selectedUser ? (
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '0.75rem',
+                                    padding: '0.6rem 0.85rem',
+                                    borderRadius: '0.5rem',
+                                    border: '1px solid rgba(148, 163, 184, 0.4)',
+                                }}
+                            >
+                                <div>
+                                    <strong>{selectedUser.username || selectedUser.email}</strong>
+                                    {selectedUser.email && (
+                                        <div style={{ fontSize: '0.8rem', opacity: 0.75 }}>
+                                            {selectedUser.email}
+                                        </div>
+                                    )}
+                                </div>
                                 <button
-                                    onClick={() => setSelectedSubscription(null)}
-                                    className="admin-subscription-details-modal__close"
+                                    type="button"
+                                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                                    onClick={() => setSelectedUser(null)}
                                 >
-                                    <FaTimes />
+                                    {t('staffSubscriptions.changeUser')}
                                 </button>
                             </div>
-
-                            <div className="admin-subscription-details-modal__body">
-                                {(() => {
-                                    const subscription = enrichedSubscription || selectedSubscription;
-                                    return (
-                                        <>
-                                            {/* User Info */}
-                                            <div className="admin-subscription-details-section">
-                                                <h3 className="admin-subscription-details-section__title">
-                                                    {t('adminSubscriptions.userInfo') || 'User Information'}
-                                                </h3>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.id') || 'ID'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {subscription.id || subscription._id || '-'}
-                                                    </span>
-                                                </div>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.phone') || 'Phone'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {subscription.phone || '-'}
-                                                    </span>
-                                                </div>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.createdBy') || 'Created By'}: {t('adminSubscriptions.name') || 'Name'}
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {subscription.createdBy 
-                                                            ? (typeof subscription.createdBy === 'object' 
-                                                                ? (subscription.createdBy.name || 
-                                                                   subscription.createdBy.username || 
-                                                                   subscription.createdBy._id || 
-                                                                   subscription.createdBy.id ||
-                                                                   '-')
-                                                                : String(subscription.createdBy))
-                                                            : '-'}
-                                                    </span>
-                                                </div>
-                                                {subscription.createdBy && typeof subscription.createdBy === 'object' && subscription.createdBy.email && (
-                                                    <div className="admin-subscription-details-row">
-                                                        <span className="admin-subscription-details-label">
-                                                            {t('adminSubscriptions.createdBy') || 'Created By'}: {t('adminSubscriptions.email') || 'Email'}
-                                                        </span>
-                                                        <span className="admin-subscription-details-value">
-                                                            {subscription.createdBy.email}
-                                                        </span>
-                                                    </div>
+                        ) : (
+                            <>
+                                <input
+                                    type="text"
+                                    className="admin-input"
+                                    placeholder={t('staffSubscriptions.searchUserPlaceholder')}
+                                    value={searchInput}
+                                    onChange={(e) => setSearchInput(e.target.value)}
+                                />
+                                {debouncedSearch.length < 2 ? (
+                                    <span
+                                        className="admin-field__hint"
+                                        style={{ alignSelf: 'flex-start' }}
+                                    >
+                                        {t('staffSubscriptions.searchHint')}
+                                    </span>
+                                ) : userSearchQuery.isFetching ? (
+                                    <span
+                                        className="admin-field__hint"
+                                        style={{ alignSelf: 'flex-start' }}
+                                    >
+                                        {t('staffCommon.loading')}
+                                    </span>
+                                ) : searchResults.length === 0 ? (
+                                    <span
+                                        className="admin-field__hint"
+                                        style={{ alignSelf: 'flex-start' }}
+                                    >
+                                        {t('staffSubscriptions.noUsersFound')}
+                                    </span>
+                                ) : (
+                                    <div
+                                        style={{
+                                            display: 'flex',
+                                            flexDirection: 'column',
+                                            gap: '0.35rem',
+                                            maxHeight: '180px',
+                                            overflowY: 'auto',
+                                            marginTop: '0.25rem',
+                                        }}
+                                    >
+                                        {searchResults.map((u) => (
+                                            <button
+                                                key={u._id}
+                                                type="button"
+                                                className="admin-btn admin-btn--secondary admin-btn--sm"
+                                                style={{
+                                                    justifyContent: 'space-between',
+                                                    width: '100%',
+                                                    textAlign: 'start',
+                                                }}
+                                                onClick={() => setSelectedUser(u)}
+                                            >
+                                                <span>
+                                                    <strong>{u.username || shortId(u._id)}</strong>
+                                                    {u.email ? ` · ${u.email}` : ''}
+                                                </span>
+                                                {u.isBrimume && (
+                                                    <StatusBadge tone="info">
+                                                        {t('staffSubscriptions.statusActive')}
+                                                    </StatusBadge>
                                                 )}
-                                            </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        )}
+                    </div>
 
-                                            {/* Plan Info */}
-                                            <div className="admin-subscription-details-section">
-                                                <h3 className="admin-subscription-details-section__title">
-                                                    {t('adminSubscriptions.planInfo') || 'Plan Information'}
-                                                </h3>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.planName') || 'Plan Name'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {subscription.planName || subscription.plan?.name || '-'}
-                                                    </span>
-                                                </div>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.duration') || 'Duration'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {subscription.durationDays || subscription.days || '-'} {t('adminSubscriptions.days') || 'days'}
-                                                    </span>
-                                                </div>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.premiumStatus') || 'Premium Status'}:
-                                                    </span>
-                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${subscription.isBrimume || subscription.userId?.isBrimume || subscription.createdBy?.isBrimume ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
-                                                        {subscription.isBrimume || subscription.userId?.isBrimume || subscription.createdBy?.isBrimume ? 'true' : 'false'}
-                                                    </span>
-                                                </div>
-                                            </div>
+                    <div className="admin-form-grid">
+                        <label className="admin-field">
+                            <span className="admin-field__label">
+                                {t('staffSubscriptions.plan')}
+                            </span>
+                            <select
+                                className="admin-input"
+                                value={grantForm.planId}
+                                onChange={(e) =>
+                                    setGrantForm((p) => ({ ...p, planId: e.target.value }))
+                                }
+                                required
+                            >
+                                <option value="">
+                                    {activePaidPlans.length === 0
+                                        ? t('staffSubscriptions.noActivePlans')
+                                        : t('staffSubscriptions.selectPlan')}
+                                </option>
+                                {activePaidPlans.map((p) => (
+                                    <option key={p._id} value={p._id}>
+                                        {p.name} ({p.type})
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
 
-                                            {/* Payment Info */}
-                                            <div className="admin-subscription-details-section">
-                                                <h3 className="admin-subscription-details-section__title">
-                                                    {t('adminSubscriptions.paymentInfo') || 'Payment Information'}
-                                                </h3>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.paymentMethod') || 'Payment Method'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value" data-field="paymentMethod">
-                                                        {subscription.paymentMethod || 
-                                                         subscription.payment?.method ||
-                                                         subscription.paymentType ||
-                                                         subscription.paymentDetails?.method ||
-                                                         '-'}
-                                                    </span>
-                                                </div>
-                                                {(subscription.invoicePic || subscription.invoice || subscription.invoiceFile || subscription.invoiceUrl) && (
-                                                    <div className="admin-subscription-details-row">
-                                                        <span className="admin-subscription-details-label">
-                                                            {t('adminSubscriptions.invoice') || 'Invoice'}:
-                                                        </span>
-                                                        <a
-                                                            href={subscription.invoicePic || 
-                                                                  subscription.invoice || 
-                                                                  subscription.invoiceUrl || 
-                                                                  (subscription.invoiceFile?.url || subscription.invoiceFile)}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="admin-subscription-details-link"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                        >
-                                                            <FaFileInvoice />
-                                                            {t('adminSubscriptions.viewInvoice') || 'View Invoice'}
-                                                        </a>
-                                                    </div>
-                                                )}
-                                            </div>
+                        <label className="admin-field">
+                            <span className="admin-field__label">
+                                {t('staffSubscriptions.durationDays')}
+                            </span>
+                            <input
+                                type="number"
+                                min="1"
+                                max="36500"
+                                step="1"
+                                className="admin-input"
+                                placeholder={
+                                    selectedPlan?.days
+                                        ? t('staffSubscriptions.durationPlaceholder', {
+                                              days: selectedPlan.days,
+                                          })
+                                        : ''
+                                }
+                                value={grantForm.durationDays}
+                                onChange={(e) =>
+                                    setGrantForm((p) => ({ ...p, durationDays: e.target.value }))
+                                }
+                            />
+                        </label>
 
-                                            {/* Date Info */}
-                                            <div className="admin-subscription-details-section">
-                                                <h3 className="admin-subscription-details-section__title">
-                                                    {t('adminSubscriptions.dateInfo') || 'Date Information'}
-                                                </h3>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.startDate') || 'Start Date'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {subscription.startDate ? formatDate(subscription.startDate) : '-'}
-                                                    </span>
-                                                </div>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.endDate') || 'End Date'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {subscription.endDate ? formatDate(subscription.endDate) : '-'}
-                                                    </span>
-                                                </div>
-                                                <div className="admin-subscription-details-row">
-                                                    <span className="admin-subscription-details-label">
-                                                        {t('adminSubscriptions.createdAt') || 'Created At'}:
-                                                    </span>
-                                                    <span className="admin-subscription-details-value">
-                                                        {formatDate(subscription.createdAt || subscription.created)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </>
-                                    );
-                                })()}
-                            </div>
+                        <label className="admin-field">
+                            <span className="admin-field__label">
+                                {t('staffSubscriptions.pricePaid')}
+                            </span>
+                            <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                className="admin-input"
+                                placeholder={
+                                    selectedPlan?.price !== undefined
+                                        ? t('staffSubscriptions.pricePaidPlaceholder', {
+                                              price: formatNumber(selectedPlan.price, language),
+                                          })
+                                        : ''
+                                }
+                                value={grantForm.pricePaid}
+                                onChange={(e) =>
+                                    setGrantForm((p) => ({ ...p, pricePaid: e.target.value }))
+                                }
+                            />
+                        </label>
 
-                            <div className="admin-subscription-details-modal__actions">
-                                <button
-                                    onClick={() => setSelectedSubscription(null)}
-                                    className="admin-subscription-details-modal__btn admin-subscription-details-modal__btn--cancel"
-                                >
-                                    {t('adminSubscriptions.close') || 'Close'}
-                                </button>
-                                <button
-                                    onClick={() => {
-                                        handleNavigateToUser(enrichedSubscription || selectedSubscription);
-                                        setSelectedSubscription(null);
-                                    }}
-                                    className="admin-subscription-details-modal__btn admin-subscription-details-modal__btn--approve"
-                                >
-                                    <FaExternalLinkAlt className="mr-2" />
-                                    {t('adminSubscriptions.goToUser') || 'Go to User/Promoter'}
-                                </button>
-                            </div>
-                        </motion.div>
-                    </motion.div>
+                        <label className="admin-field">
+                            <span className="admin-field__label">
+                                {t('staffSubscriptions.paymentReference')}
+                            </span>
+                            <input
+                                type="text"
+                                maxLength={200}
+                                className="admin-input"
+                                placeholder={t('staffSubscriptions.paymentReferencePlaceholder')}
+                                value={grantForm.paymentReference}
+                                onChange={(e) =>
+                                    setGrantForm((p) => ({
+                                        ...p,
+                                        paymentReference: e.target.value,
+                                    }))
+                                }
+                            />
+                        </label>
+                    </div>
+
+                    <label className="admin-field">
+                        <span className="admin-field__label">{t('staffCommon.reason')}</span>
+                        <textarea
+                            className="admin-input admin-input--textarea"
+                            rows={3}
+                            maxLength={500}
+                            placeholder={t('staffCommon.reasonPlaceholder')}
+                            value={grantForm.reason}
+                            onChange={(e) =>
+                                setGrantForm((p) => ({ ...p, reason: e.target.value }))
+                            }
+                            required
+                        />
+                        <span className="admin-field__hint">{grantForm.reason.length}/500</span>
+                    </label>
+
+                    {grantError && <p className="admin-field__error">{grantError}</p>}
+
+                    <div className="admin-modal__footer">
+                        <button
+                            type="button"
+                            className="admin-btn admin-btn--secondary"
+                            onClick={closeGrantModal}
+                            disabled={granting}
+                        >
+                            {t('staffCommon.cancel')}
+                        </button>
+                        <button
+                            type="submit"
+                            className="admin-btn admin-btn--primary"
+                            disabled={granting || activePaidPlans.length === 0}
+                        >
+                            {granting
+                                ? t('staffCommon.saving')
+                                : t('staffSubscriptions.grantSubmit')}
+                        </button>
+                    </div>
+                </form>
+            </AdminModal>
+
+            <ReasonModal
+                open={Boolean(revokeTarget)}
+                title={t('staffSubscriptions.revokeTitle')}
+                description={
+                    revokeTarget
+                        ? t('staffSubscriptions.revokeDescription', {
+                              user: userLabel(revokeTarget),
+                          })
+                        : ''
+                }
+                confirmLabel={t('staffSubscriptions.revokeConfirm')}
+                tone="danger"
+                reasonRequired
+                maxLength={500}
+                onConfirm={handleRevokeConfirm}
+                onClose={() => setRevokeTarget(null)}
+            />
+
+            <AdminModal
+                open={Boolean(detailRow)}
+                title={t('staffSubscriptions.detailsTitle')}
+                onClose={() => setDetailRow(null)}
+                footer={
+                    <button
+                        type="button"
+                        className="admin-btn admin-btn--secondary"
+                        onClick={() => setDetailRow(null)}
+                    >
+                        {t('staffCommon.close')}
+                    </button>
+                }
+            >
+                {detailRow && (
+                    <DetailList
+                        items={[
+                            { label: t('staffCommon.id'), value: detailRow._id },
+                            {
+                                label: t('staffCommon.user'),
+                                value: userIdOf(detailRow) ? (
+                                    <Link to={`/Owner/Users/${userIdOf(detailRow)}`}>
+                                        {userLabel(detailRow)}
+                                    </Link>
+                                ) : null,
+                            },
+                            {
+                                label: t('staffSubscriptions.plan'),
+                                value: detailRow.plan
+                                    ? `${detailRow.plan.name} (${detailRow.plan.type})`
+                                    : detailRow.planId,
+                            },
+                            {
+                                label: t('staffCommon.status'),
+                                value: (
+                                    <StatusBadge tone={STATUS_TONE[detailRow.status] || 'neutral'}>
+                                        {statusLabel(detailRow.status)}
+                                    </StatusBadge>
+                                ),
+                            },
+                            {
+                                label: t('staffSubscriptions.startDate'),
+                                value: formatDate(detailRow.startDate, language),
+                            },
+                            {
+                                label: t('staffSubscriptions.endDate'),
+                                value: formatDate(detailRow.endDate, language),
+                            },
+                            {
+                                label: t('staffSubscriptions.pricePaid'),
+                                value:
+                                    detailRow.pricePaid !== undefined && detailRow.pricePaid !== null
+                                        ? formatNumber(detailRow.pricePaid, language)
+                                        : null,
+                            },
+                            {
+                                label: t('staffSubscriptions.paymentReference'),
+                                value: detailRow.paymentReference,
+                            },
+                            {
+                                label: t('staffSubscriptions.grantReason'),
+                                value: detailRow.grantReason,
+                            },
+                            {
+                                label: t('staffSubscriptions.grantedBy'),
+                                value: detailRow.grantedBy,
+                            },
+                            {
+                                label: t('staffSubscriptions.cancelledAt'),
+                                value: formatDate(detailRow.cancelledAt, language),
+                            },
+                            {
+                                label: t('staffSubscriptions.cancelledBy'),
+                                value: detailRow.cancelledBy,
+                            },
+                            {
+                                label: t('staffSubscriptions.cancelReason'),
+                                value: detailRow.cancelReason,
+                            },
+                            {
+                                label: t('staffCommon.createdAt'),
+                                value: formatDate(detailRow.createdAt, language),
+                            },
+                        ]}
+                    />
                 )}
-            </AnimatePresence>
+            </AdminModal>
 
-        </div>
+            <AdminModal
+                open={Boolean(approveTarget)}
+                title={t('staffSubscriptions.approveTitle')}
+                onClose={closeApproveModal}
+            >
+                {approveTarget && (
+                    <form className="admin-form" onSubmit={handleApproveSubmit}>
+                        <p style={{ margin: 0 }}>
+                            {t('staffSubscriptions.approveDescription', {
+                                user: userLabel(approveTarget),
+                                plan: approveTarget.plan?.name || shortId(approveTarget.planId),
+                            })}
+                        </p>
+
+                        <DetailList
+                            items={[
+                                {
+                                    label: t('staffSubscriptions.paymentReference'),
+                                    value: approveTarget.paymentReference,
+                                },
+                                {
+                                    label: t('staffSubscriptions.note'),
+                                    value: approveTarget.note,
+                                },
+                                {
+                                    label: t('staffSubscriptions.invoice'),
+                                    value: approveTarget.invoiceUrl ? (
+                                        <a
+                                            href={approveTarget.invoiceUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >
+                                            {t('staffSubscriptions.viewInvoice')}
+                                        </a>
+                                    ) : null,
+                                },
+                            ]}
+                        />
+
+                        <label className="admin-field">
+                            <span className="admin-field__label">
+                                {t('staffSubscriptions.durationDays')}
+                            </span>
+                            <input
+                                type="number"
+                                min="1"
+                                max="36500"
+                                step="1"
+                                className="admin-input"
+                                placeholder={
+                                    approveTarget.plan?.days
+                                        ? t('staffSubscriptions.durationPlaceholder', {
+                                              days: approveTarget.plan.days,
+                                          })
+                                        : ''
+                                }
+                                value={approveDuration}
+                                onChange={(e) => setApproveDuration(e.target.value)}
+                            />
+                        </label>
+
+                        <label className="admin-field">
+                            <span className="admin-field__label">{t('staffCommon.reason')}</span>
+                            <textarea
+                                className="admin-input admin-input--textarea"
+                                rows={3}
+                                maxLength={500}
+                                placeholder={t('staffCommon.reasonPlaceholder')}
+                                value={approveReason}
+                                onChange={(e) => setApproveReason(e.target.value)}
+                                required
+                            />
+                            <span className="admin-field__hint">{approveReason.length}/500</span>
+                        </label>
+
+                        {approveError && <p className="admin-field__error">{approveError}</p>}
+
+                        <div className="admin-modal__footer">
+                            <button
+                                type="button"
+                                className="admin-btn admin-btn--secondary"
+                                onClick={closeApproveModal}
+                                disabled={approving}
+                            >
+                                {t('staffCommon.cancel')}
+                            </button>
+                            <button
+                                type="submit"
+                                className="admin-btn admin-btn--primary"
+                                disabled={approving}
+                            >
+                                {approving
+                                    ? t('staffCommon.saving')
+                                    : t('staffSubscriptions.approveSubmit')}
+                            </button>
+                        </div>
+                    </form>
+                )}
+            </AdminModal>
+
+            <ReasonModal
+                open={Boolean(rejectTarget)}
+                title={t('staffSubscriptions.rejectTitle')}
+                description={
+                    rejectTarget
+                        ? t('staffSubscriptions.rejectDescription', {
+                              user: userLabel(rejectTarget),
+                              plan: rejectTarget.plan?.name || shortId(rejectTarget.planId),
+                          })
+                        : ''
+                }
+                confirmLabel={t('staffSubscriptions.rejectConfirm')}
+                tone="danger"
+                reasonRequired
+                maxLength={500}
+                onConfirm={handleRejectConfirm}
+                onClose={() => setRejectTarget(null)}
+            />
+
+            <AdminModal
+                open={Boolean(requestDetailRow)}
+                title={t('staffSubscriptions.requestDetailsTitle')}
+                onClose={() => setRequestDetailRow(null)}
+                footer={
+                    <button
+                        type="button"
+                        className="admin-btn admin-btn--secondary"
+                        onClick={() => setRequestDetailRow(null)}
+                    >
+                        {t('staffCommon.close')}
+                    </button>
+                }
+            >
+                {requestDetailRow && (
+                    <DetailList
+                        items={[
+                            { label: t('staffCommon.id'), value: requestDetailRow._id },
+                            {
+                                label: t('staffCommon.user'),
+                                value: userIdOf(requestDetailRow) ? (
+                                    <Link to={`/Owner/Users/${userIdOf(requestDetailRow)}`}>
+                                        {userLabel(requestDetailRow)}
+                                    </Link>
+                                ) : null,
+                            },
+                            {
+                                label: t('staffSubscriptions.plan'),
+                                value: requestDetailRow.plan
+                                    ? `${requestDetailRow.plan.name} (${requestDetailRow.plan.type})`
+                                    : requestDetailRow.planId,
+                            },
+                            {
+                                label: t('staffCommon.status'),
+                                value: (
+                                    <StatusBadge
+                                        tone={REQUEST_STATUS_TONE[requestDetailRow.status] || 'neutral'}
+                                    >
+                                        {requestStatusLabel(requestDetailRow.status)}
+                                    </StatusBadge>
+                                ),
+                            },
+                            {
+                                label: t('staffSubscriptions.paymentReference'),
+                                value: requestDetailRow.paymentReference,
+                            },
+                            {
+                                label: t('staffSubscriptions.note'),
+                                value: requestDetailRow.note,
+                            },
+                            {
+                                label: t('staffSubscriptions.invoice'),
+                                value: requestDetailRow.invoiceUrl ? (
+                                    <a
+                                        href={requestDetailRow.invoiceUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        {t('staffSubscriptions.viewInvoice')}
+                                    </a>
+                                ) : null,
+                            },
+                            {
+                                label: t('staffSubscriptions.reviewedBy'),
+                                value: requestDetailRow.reviewedBy,
+                            },
+                            {
+                                label: t('staffSubscriptions.reviewedAt'),
+                                value: formatDate(requestDetailRow.reviewedAt, language),
+                            },
+                            {
+                                label: t('staffSubscriptions.reviewReason'),
+                                value: requestDetailRow.reviewReason,
+                            },
+                            {
+                                label: t('staffSubscriptions.linkedSubscription'),
+                                value: requestDetailRow.subscriptionId,
+                            },
+                            {
+                                label: t('staffCommon.createdAt'),
+                                value: formatDate(requestDetailRow.createdAt, language),
+                            },
+                        ]}
+                    />
+                )}
+            </AdminModal>
+        </AdminPage>
     );
 }

@@ -1,0 +1,262 @@
+{
+  "staffUsers": {
+    "title": "Users",
+    "subtitle": "Manage user accounts, roles, subscriptions, and activity",
+    "notificationsLink": "Notifications",
+    "listTitle": "User accounts",
+    "searchPlaceholder": "ID, email, or username prefix",
+    "filters": {
+      "search": "Search",
+      "role": "Role",
+      "status": "Status",
+      "confirmed": "Confirmed",
+      "promoter": "Promoter",
+      "premium": "Premium"
+    },
+    "roles": {
+      "User": "User",
+      "Admin": "Admin",
+      "Owner": "Owner"
+    },
+    "statuses": {
+      "active": "Active",
+      "banned": "Banned",
+      "closed": "Closed",
+      "deleted": "Deleted"
+    },
+    "columns": {
+      "username": "Username",
+      "email": "Email",
+      "role": "Role",
+      "status": "Status",
+      "premium": "Premium",
+      "promoter": "Promoter",
+      "created": "Created"
+    },
+    "detail": {
+      "title": "User details",
+      "subtitle": "Account overview, storage, and activity",
+      "viewFolders": "User folders",
+      "viewShares": "User shares",
+      "tabs": {
+        "overview": "Overview",
+        "storage": "Storage",
+        "downloads": "Downloads",
+        "saves": "Saves",
+        "archives": "Archives",
+        "earnings": "Earnings"
+      },
+      "accountInfo": "Account information",
+      "fields": {
+        "id": "User ID",
+        "username": "Username",
+        "email": "Email",
+        "provider": "Provider",
+        "role": "Role",
+        "status": "Status",
+        "confirmed": "Email confirmed",
+        "promoter": "Promoter",
+        "premium": "Premium",
+        "premiumExpires": "Premium expires",
+        "language": "Language",
+        "country": "Country",
+        "freeQuota": "Free storage quota",
+        "paidQuota": "Paid storage quota",
+        "savesQuota": "Saves quota",
+        "createdAt": "Created",
+        "bannedAt": "Banned at",
+        "deletedAt": "Deleted at"
+      },
+      "decisions": {
+        "banTitle": "Last ban decision",
+        "roleTitle": "Last role decision",
+        "actor": "Staff ID",
+        "at": "Recorded at",
+        "reason": "Reason"
+      },
+      "actions": {
+        "ban": "Ban user",
+        "unban": "Unban user",
+        "changeRole": "Change role",
+        "grantPremium": "Grant premium",
+        "revokePremium": "Revoke premium",
+        "sendNotification": "Send notification",
+        "deleteUser": "Delete user"
+      },
+      "modals": {
+        "banTitle": "Ban user account",
+        "banDescription": "Banning this account will invalidate active sessions and prevent sign-in.",
+        "banConfirm": "Ban user",
+        "banSuccess": "User banned successfully",
+        "unbanTitle": "Unban user account",
+        "unbanDescription": "Unbanning restores sign-in access for this account.",
+        "unbanConfirm": "Unban user",
+        "unbanSuccess": "User unbanned successfully",
+        "roleTitle": "Change user role",
+        "roleDescription": "Switch this account between User and Admin. Active sessions will be invalidated.",
+        "roleLabel": "New role",
+        "roleConfirm": "Update role",
+        "roleSuccess": "User role updated",
+        "deleteTitle": "Delete user account",
+        "deleteDescription": "Permanently remove this account record. This action cannot be undone.",
+        "deleteConfirm": "Delete permanently",
+        "deleteSuccess": "User deleted",
+        "grantTitle": "Grant premium subscription",
+        "grantDescription": "Select an active paid plan. Any existing active subscription will be superseded.",
+        "grantPlan": "Plan",
+        "grantPlanPlaceholder": "Select a plan",
+        "grantNoPlans": "No active paid plans available",
+        "grantDuration": "Duration (days, optional)",
+        "grantDurationHint": "Defaults to plan duration (1–36500)",
+        "grantPrice": "Price paid (optional)",
+        "grantReference": "Payment reference (optional)",
+        "grantConfirm": "Grant premium",
+        "grantSuccess": "Premium subscription granted",
+        "revokeTitle": "Revoke premium subscription",
+        "revokeDescription": "Cancels active subscriptions, sets paid quota to 0, and moves paid files into the 7-day grace period.",
+        "revokeConfirm": "Revoke premium",
+        "revokeSuccess": "Premium subscription revoked",
+        "notifyTitle": "Send notification",
+        "notifyTitleField": "Title",
+        "notifyTitlePlaceholder": "Notification title (1–200 chars)",
+        "notifyBodyField": "Message",
+        "notifyBodyPlaceholder": "Notification body (1–2000 chars)",
+        "notifySend": "Send notification",
+        "notifySuccess": "Notification sent"
+      },
+      "storage": {
+        "usageTitle": "Storage usage",
+        "freeDrive": "Free drive",
+        "paidDrive": "Paid drive",
+        "saves": "Saves",
+        "usedOf": "{{used}} of {{total}} ({{percent}}%)",
+        "available": "{{available}} available",
+        "recalculate": "Recalculate usage",
+        "recalculating": "Recalculating…",
+        "recalculateSuccess": "Storage usage recalculated",
+        "recalcResultTitle": "Last recalculation result",
+        "before": "Before",
+        "after": "After",
+        "recalculatedAt": "Recalculated at",
+        "recalculatedBy": "Recalculated by",
+        "graceTitle": "Grace period",
+        "inGrace": "In grace period",
+        "suspendedSpace": "Suspended space",
+        "suspendedFiles": "Suspended files",
+        "deletionDeadline": "Deletion deadline",
+        "quotaTitle": "Update free storage quota",
+        "quotaLabel": "Free storage quota (MB)",
+        "quotaSubmit": "Update quota",
+        "quotaSuccess": "Free storage quota updated"
+      },
+      "downloads": {
+        "allowanceTitle": "Daily download allowance",
+        "allowed": "Allowed",
+        "used": "Used today",
+        "remaining": "Remaining",
+        "limit": "Daily limit",
+        "resetAt": "Last reset",
+        "historyTitle": "Download history",
+        "fileId": "File ID",
+        "fileName": "File name",
+        "fileType": "Type",
+        "fileSize": "Size",
+        "downloadedAt": "Downloaded at"
+      },
+      "saves": {
+        "title": "Saved items",
+        "folderId": "Folder ID or 'root'",
+        "folderIdPlaceholder": "root or folder ID",
+        "itemType": "Item type",
+        "shareId": "Share ID",
+        "originalFileId": "Original file ID",
+        "types": {
+          "file": "File",
+          "folder": "Folder"
+        },
+        "columns": {
+          "type": "Type",
+          "name": "Name",
+          "size": "Size",
+          "parent": "Parent",
+          "parentState": "Parent state",
+          "originalState": "Original state",
+          "shareState": "Share state",
+          "created": "Created"
+        },
+        "states": {
+          "root": "Root",
+          "available": "Available",
+          "missing": "Missing",
+          "none": "None",
+          "unverified": "Unverified",
+          "active": "Active",
+          "inactive": "Inactive"
+        }
+      },
+      "archives": {
+        "title": "Archived items",
+        "itemType": "Item type",
+        "columns": {
+          "type": "Type",
+          "name": "Name",
+          "fileType": "File type",
+          "size": "Size",
+          "uploadStatus": "Upload status",
+          "created": "Created",
+          "detail": "Inspect"
+        },
+        "openDetail": "Open"
+      },
+      "earnings": {
+        "title": "File earnings",
+        "totalEarnings": "Total earnings",
+        "pendingRewards": "Pending rewards",
+        "confirmedRewards": "Confirmed rewards",
+        "columns": {
+          "fileName": "File",
+          "totalEarnings": "Total earnings",
+          "pendingRewards": "Pending",
+          "confirmedRewards": "Confirmed",
+          "lastUpdated": "Last updated"
+        }
+      }
+    },
+    "stats": {
+      "title": "User statistics",
+      "subtitle": "Platform-wide account counts and growth snapshot",
+      "totalUsers": "Total users",
+      "usersLast30Days": "New users (30 days)",
+      "promotersCount": "Promoters",
+      "premiumCount": "Premium users"
+    }
+  },
+  "staffStorage": {
+    "title": "Storage",
+    "subtitle": "Platform storage statistics and bulk free-tier quota management",
+    "stats": {
+      "totalFiles": "Total files",
+      "completedFiles": "Completed files",
+      "totalFolders": "Total folders",
+      "sharedFiles": "Shared files",
+      "uniqueSharedUsers": "Active sharers",
+      "totalUsedSpace": "Total used space"
+    },
+    "bulk": {
+      "title": "Bulk free-storage quota",
+      "allTitle": "Update all accounts",
+      "allDescription": "Sets free_storage_quota_mb for every account on the platform.",
+      "freeTitle": "Update free accounts only",
+      "freeDescription": "Sets free_storage_quota_mb for accounts without an active paid subscription.",
+      "quotaLabel": "Free storage quota (MB)",
+      "applyAll": "Apply to all users",
+      "applyFree": "Apply to free users",
+      "confirmAllTitle": "Confirm quota update for ALL users",
+      "confirmAllDescription": "Set free storage quota to {{quota}} MB for all accounts?",
+      "confirmFreeTitle": "Confirm quota update for FREE users",
+      "confirmFreeDescription": "Set free storage quota to {{quota}} MB for all free accounts?",
+      "updatedResult": "Updated {{count}} account(s) to {{quota}} MB.",
+      "invalidQuota": "Enter a valid non-negative number of megabytes."
+    }
+  }
+}

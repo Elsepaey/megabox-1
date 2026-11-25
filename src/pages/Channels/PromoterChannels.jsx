@@ -19,57 +19,6 @@ export default function PromoterChannels() {
     const navigate = useNavigate();
     const [showCreateModal, setShowCreateModal] = useState(false);
 
-    // Mockup data structure for endpoint preview
-    const mockupData = useMemo(() => ({
-        success: true,
-        message: t('channels.mockup.message') || "تم جلب القنوات",
-        data: {
-            myChannels: [
-                {
-                    _id: "6921b7309ad89d1d8ba8fb3f",
-                    name: t('channels.mockup.myChannel1.name') || "My Tech Channel",
-                    description: t('channels.mockup.myChannel1.description') || "Technology tutorials and reviews",
-                    image: {
-                        secure_url: "https://via.placeholder.com/400x300/6366f1/ffffff?text=My+Tech+Channel",
-                        public_id: "channels/my-tech-channel"
-                    },
-                    filesCount: 25,
-                    subscribersCount: 3420,
-                    createdAt: "2025-11-20T10:30:00.000Z",
-                    createdBy: "691393863050c43d28b86b81"
-                },
-                {
-                    _id: "6921b75b9ad89d1d8ba8fb8e",
-                    name: t('channels.mockup.myChannel2.name') || "Business Tips",
-                    description: t('channels.mockup.myChannel2.description') || "Entrepreneurship and business advice",
-                    image: {
-                        secure_url: "https://via.placeholder.com/400x300/8b5cf6/ffffff?text=Business+Channel",
-                        public_id: "channels/business-channel"
-                    },
-                    filesCount: 12,
-                    subscribersCount: 1850,
-                    createdAt: "2025-11-18T14:20:00.000Z",
-                    createdBy: "691393863050c43d28b86b81"
-                }
-            ],
-            subscribedChannels: [
-                {
-                    _id: "6921c1239ad89d1d8ba8fc12",
-                    name: t('channels.mockup.subscribedChannel1.name') || "Design Masterclass",
-                    description: t('channels.mockup.subscribedChannel1.description') || "Learn design from experts",
-                    image: {
-                        secure_url: "https://via.placeholder.com/400x300/10b981/ffffff?text=Design+Masterclass",
-                        public_id: "channels/design-masterclass"
-                    },
-                    filesCount: 18,
-                    subscribersCount: 2100,
-                    createdAt: "2025-11-15T09:15:00.000Z",
-                    createdBy: "691393863050c43d28b86b82"
-                }
-            ]
-        }
-    }), [t]);
-
     // Close sidenav when modal opens
     useEffect(() => {
         if (showCreateModal) {
@@ -89,37 +38,45 @@ export default function PromoterChannels() {
     const [channelName, setChannelName] = useState('');
     const [channelDescription, setChannelDescription] = useState('');
     const [channelImage, setChannelImage] = useState(null);
+    const [myPage, setMyPage] = useState(1);
+    const [subPage, setSubPage] = useState(1);
+    const [activeTab, setActiveTab] = useState('my'); // 'my' | 'subscribed'
+    const PAGE_LIMIT = 12;
 
-    // Fetch subscribed channels (promoters can also subscribe to other channels)
-    const { data: channelsData, isLoading: channelsLoading } = useQuery(
-        'mySubscribedChannels',
-        () => channelService.getMySubscribedChannels(Token.MegaBox),
+    const { data: myChannelsData, isLoading: myChannelsLoading } = useQuery(
+        ['myChannels', myPage],
+        () => channelService.getMyChannels(Token.MegaBox, { page: myPage, limit: PAGE_LIMIT }),
         {
             enabled: !!Token.MegaBox,
-            cacheTime: 300000
+            cacheTime: 300000,
+            keepPreviousData: true,
         }
     );
 
-    // Combine myChannels and subscribedChannels
-    const allChannels = useMemo(() => {
-        const data = channelsData?.data || channelsData;
-        const myChannels = data?.myChannels || [];
-        const subscribedChannels = data?.subscribedChannels || [];
-        
-        // Show mockup data if no real data exists
-        if (myChannels.length === 0 && subscribedChannels.length === 0) {
-            return [...mockupData.data.myChannels, ...mockupData.data.subscribedChannels];
+    const { data: subscribedData, isLoading: subscribedLoading } = useQuery(
+        ['mySubscribedChannels', subPage],
+        () => channelService.getMySubscribedChannels(Token.MegaBox, { page: subPage, limit: PAGE_LIMIT }),
+        {
+            enabled: !!Token.MegaBox,
+            cacheTime: 300000,
+            keepPreviousData: true,
         }
-        
-        // Combine and remove duplicates based on _id
-        const combined = [...myChannels, ...subscribedChannels];
-        const uniqueChannels = combined.filter((channel, index, self) =>
-            index === self.findIndex((c) => (c._id || c.id) === (channel._id || channel.id))
-        );
-        return uniqueChannels;
-    }, [channelsData, mockupData]);
+    );
 
-    // Create channel mutation
+    const channelsLoading = activeTab === 'my' ? myChannelsLoading : subscribedLoading;
+
+    const allChannels = useMemo(() => {
+        const list = activeTab === 'my'
+            ? (Array.isArray(myChannelsData?.data) ? myChannelsData.data : [])
+            : (Array.isArray(subscribedData?.data) ? subscribedData.data : []);
+        return list;
+    }, [activeTab, myChannelsData, subscribedData]);
+
+    const currentPage = activeTab === 'my' ? myPage : subPage;
+    const setCurrentPage = activeTab === 'my' ? setMyPage : setSubPage;
+    const totalPages = activeTab === 'my'
+        ? (myChannelsData?.meta?.totalPages || 1)
+        : (subscribedData?.meta?.totalPages || 1);
     const createChannelMutation = useMutation(
         (formData) => channelService.createChannel(
             formData.image,
@@ -128,32 +85,8 @@ export default function PromoterChannels() {
             Token.MegaBox
         ),
         {
-            onSuccess: (response) => {
-                // Manually add the created channel to the cache
-                queryClient.setQueryData('mySubscribedChannels', (oldData) => {
-                    // Handle response structure: response.data.data or response.data
-                    const newChannel = response?.data?.data || response?.data || response;
-                    if (newChannel && (newChannel._id || newChannel.id)) {
-                        const data = oldData?.data || oldData;
-                        const myChannels = data?.myChannels || [];
-                        
-                        // Check if channel already exists
-                        const exists = myChannels.some(c => (c._id || c.id) === (newChannel._id || newChannel.id));
-                        
-                        if (!exists) {
-                            return {
-                                ...oldData,
-                                data: {
-                                    ...data,
-                                    myChannels: [...myChannels, newChannel],
-                                    subscribedChannels: data?.subscribedChannels || []
-                                }
-                            };
-                        }
-                    }
-                    return oldData;
-                });
-                // Also invalidate to refetch from server
+            onSuccess: () => {
+                queryClient.invalidateQueries('myChannels');
                 queryClient.invalidateQueries('mySubscribedChannels');
                 setShowCreateModal(false);
                 setChannelName('');
@@ -165,12 +98,12 @@ export default function PromoterChannels() {
 
     const handleCreateChannel = (e) => {
         e.preventDefault();
-        if (!channelName || !channelImage) {
+        if (!channelName.trim()) {
             return;
         }
         createChannelMutation.mutate({
-            name: channelName,
-            description: channelDescription,
+            name: channelName.trim(),
+            description: channelDescription.trim(),
             image: channelImage
         });
     };
@@ -196,89 +129,105 @@ export default function PromoterChannels() {
                         {t('channels.createChannel') || 'Create Channel'}
                     </motion.button>
                 </div>
+                <div className="flex gap-2 mb-6">
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('my')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'my' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50'}`}
+                    >
+                        {t('channels.myChannels') || 'My Channels'}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('subscribed')}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'subscribed' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50'}`}
+                    >
+                        {t('filesV2.subscribedChannels') || 'Subscribed Channels'}
+                    </button>
+                </div>
 
                 {/* Created/Subscribed Channels Grid */}
                 {allChannels && allChannels.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {allChannels.map((channel) => (
-                            <motion.div
-                                key={channel._id || channel.id}
-                                className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 p-6 hover:shadow-xl transition-shadow"
-                                initial={{ opacity: 0, y: 20 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                whileHover={{ scale: 1.02 }}
-                            >
-                                {(channel.image || (typeof channel.image === 'object' && channel.image?.secure_url)) && (
-                                    <img
-                                        src={typeof channel.image === 'object' ? channel.image.secure_url : channel.image}
-                                        alt={channel.name || t('channels.placeholder.channelName') || 'Channel'}
-                                        className="w-full h-48 object-cover rounded-lg mb-4"
-                                        onError={(e) => {
-                                            e.target.style.display = 'none';
-                                        }}
-                                    />
-                                )}
-                                {!channel.image && (typeof channel.image !== 'object' || !channel.image?.secure_url) && (
-                                    <div className="w-full h-48 bg-indigo-100 rounded-lg mb-4 flex items-center justify-center">
-                                        <span className="text-indigo-400 text-sm">{t('channels.placeholder.channelName') || 'No Image'}</span>
-                                    </div>
-                                )}
-                                <h3 className="text-xl font-semibold text-indigo-900 mb-2">
-                                    {channel.name || t('channels.placeholder.channelName') || 'Unnamed Channel'}
-                                </h3>
-                                <p className="text-gray-600 text-sm mb-4">
-                                    {channel.description || t('channels.noDescription') || 'No description'}
-                                </p>
-                                
-                                {/* Channel ID - for sharing */}
-                                <div className="mb-3 p-2 bg-indigo-50 rounded-lg border border-indigo-200">
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-xs text-gray-500 mb-1">{t('channels.channelId') || 'Channel ID'}:</p>
-                                            <p className="text-xs font-mono text-indigo-700 truncate" title={channel._id || channel.id}>
-                                                {channel._id || channel.id}
-                                            </p>
-                                        </div>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                const id = channel._id || channel.id;
-                                                navigator.clipboard.writeText(id).then(() => {
-                                                    toast.success(t('channels.idCopied') || 'Channel ID copied!', ToastOptions("success"));
-                                                }).catch(() => {
-                                                    toast.error(t('channels.copyFailed') || 'Failed to copy', ToastOptions("error"));
-                                                });
-                                            }}
-                                            className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded transition-colors flex-shrink-0"
-                                            title={t('channels.copyId') || 'Copy ID'}
-                                        >
-                                            {t('channels.copy') || 'Copy'}
-                                        </button>
-                                    </div>
-                                </div>
-                                
-                                {/* Placeholder for channel stats */}
-                                <div className="flex flex-wrap gap-3 text-xs text-gray-500 mb-3">
-                                    {channel.filesCount !== undefined && (
-                                        <span>{t('channels.filesCount', { count: channel.filesCount }) || `${channel.filesCount} files`}</span>
-                                    )}
-                                    {channel.subscribersCount !== undefined && (
-                                        <span>{t('channels.subscribersCount', { count: channel.subscribersCount }) || `${channel.subscribersCount} subscribers`}</span>
-                                    )}
-                                    {channel.createdAt && (
-                                        <span>{t('channels.createdAt') || 'Created'}: {new Date(channel.createdAt).toLocaleDateString()}</span>
-                                    )}
-                                </div>
-                                <button
-                                    onClick={() => {
-                                        navigate(`/Promoter/channels/${channel._id || channel.id}/files`);
-                                    }}
-                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition-colors"
+                        {allChannels.map((channel) => {
+                            const coverUrl = channel.coverImage?.secure_url
+                                || channel.iconId?.image?.secure_url
+                                || (typeof channel.image === 'object' ? channel.image?.secure_url : channel.image);
+                            const subCount = channel.subscriberCount ?? channel.subscribersCount;
+                            return (
+                                <motion.div
+                                    key={channel._id || channel.id}
+                                    className="bg-white rounded-xl shadow-lg border-2 border-indigo-100 p-6 hover:shadow-xl transition-shadow"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    whileHover={{ scale: 1.02 }}
                                 >
-                                    {t('channels.manageFiles') || 'Manage Files'}
-                                </button>
-                            </motion.div>
-                        ))}
+                                    {coverUrl ? (
+                                        <img
+                                            src={coverUrl}
+                                            alt={channel.name || t('channels.placeholder.channelName') || 'Channel'}
+                                            className="w-full h-48 object-cover rounded-lg mb-4"
+                                            onError={(e) => {
+                                                e.target.style.display = 'none';
+                                            }}
+                                        />
+                                    ) : (
+                                        <div className="w-full h-48 bg-indigo-100 rounded-lg mb-4 flex items-center justify-center">
+                                            <span className="text-indigo-400 text-sm">{t('channels.placeholder.channelName') || 'No Image'}</span>
+                                        </div>
+                                    )}
+                                    <h3 className="text-xl font-semibold text-indigo-900 mb-2">
+                                        {channel.name || t('channels.placeholder.channelName') || 'Unnamed Channel'}
+                                    </h3>
+                                    <p className="text-gray-600 text-sm mb-4">
+                                        {channel.description || t('channels.noDescription') || 'No description'}
+                                    </p>
+
+                                    <div className="mb-3 p-2 bg-indigo-50 rounded-lg border border-indigo-200">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs text-gray-500 mb-1">{t('channels.channelId') || 'Channel ID'}:</p>
+                                                <p className="text-xs font-mono text-indigo-700 truncate" title={channel._id || channel.id}>
+                                                    {channel._id || channel.id}
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const id = channel._id || channel.id;
+                                                    navigator.clipboard.writeText(id).then(() => {
+                                                        toast.success(t('channels.idCopied') || 'Channel ID copied!', ToastOptions("success"));
+                                                    }).catch(() => {
+                                                        toast.error(t('channels.copyFailed') || 'Failed to copy', ToastOptions("error"));
+                                                    });
+                                                }}
+                                                className="px-2 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded transition-colors flex-shrink-0"
+                                                title={t('channels.copyId') || 'Copy ID'}
+                                            >
+                                                {t('channels.copy') || 'Copy'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap gap-3 text-xs text-gray-500 mb-3">
+                                        {subCount !== undefined && (
+                                            <span>{t('channels.subscribersCount', { count: subCount }) || `${subCount} subscribers`}</span>
+                                        )}
+                                        {channel.createdAt && (
+                                            <span>{t('channels.createdAt') || 'Created'}: {new Date(channel.createdAt).toLocaleDateString()}</span>
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            navigate(`/Promoter/channels/${channel._id || channel.id}/files`);
+                                        }}
+                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg transition-colors"
+                                    >
+                                        {t('channels.manageFiles') || 'Manage Files'}
+                                    </button>
+                                </motion.div>
+                            );
+                        })}
                     </div>
                 ) : (
                     <div className="text-center py-12 bg-white rounded-xl shadow-lg border-2 border-indigo-100">
@@ -290,6 +239,29 @@ export default function PromoterChannels() {
                             className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-medium"
                         >
                             {t('channels.createFirstChannel') || 'Create Your First Channel'}
+                        </button>
+                    </div>
+                )}
+                {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-3 mt-8">
+                        <button
+                            type="button"
+                            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                            disabled={currentPage <= 1}
+                            className="px-4 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                        >
+                            {t('filesV2.prev') || 'Previous'}
+                        </button>
+                        <span className="text-sm text-indigo-900 font-medium">
+                            {currentPage} / {totalPages}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                            disabled={currentPage >= totalPages}
+                            className="px-4 py-2 bg-white border border-indigo-200 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                        >
+                            {t('filesV2.next') || 'Next'}
                         </button>
                     </div>
                 )}
@@ -336,9 +308,8 @@ export default function PromoterChannels() {
                                     <input
                                         type="file"
                                         accept="image/*"
-                                        onChange={(e) => setChannelImage(e.target.files[0])}
+                                        onChange={(e) => setChannelImage(e.target.files[0] || null)}
                                         className="w-full px-4 py-2 border-2 border-indigo-200 rounded-lg focus:border-indigo-500 focus:outline-none"
-                                        required
                                     />
                                 </div>
                                 <div className="flex gap-3">

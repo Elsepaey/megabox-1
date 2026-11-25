@@ -28,9 +28,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useQuery, useQueryClient } from 'react-query';
 import { notificationService, userService } from '../../services';
-import { fileService } from '../../services/api';
-import { getAllUnifiedItems } from '../../services/itemsService';
-import { API_URL } from '../../services/api';
+import { getAllUnifiedItems, itemsService } from '../../services/itemsService';
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../helpers/ToastOptions';
 import { getFileCategory } from '../../helpers/MimeType';
@@ -136,17 +134,31 @@ export default function Sidenav({ role }) {
         }
     );
 
-    const handleFileClick = (file) => {
+    const handleFileClick = async (file) => {
         const fileCategory = getFileCategory(file?.fileType);
-        const fileUrl = file?.url || file?.fileUrl;
+        const fileId = file?._id || file?.id;
+        const fileName = file?.fileName || file?.name;
 
         if (fileCategory === 'image' || fileCategory === 'video') {
-            Representation(fileUrl, file?.fileType, false);
+            let fileUrl = file?.accessUrl || file?.url || file?.fileUrl;
+            let resolvedType = file?.fileType;
+            if (fileId && Token.MegaBox) {
+                try {
+                    const details = await itemsService.getFileDetails(Token.MegaBox, fileId);
+                    if (details?.accessUrl) fileUrl = details.accessUrl;
+                    if (details?.fileType) resolvedType = details.fileType;
+                } catch (err) {
+                    toast.error(err?.response?.data?.message || t('files.failedToLoadFile') || 'Failed to open file', ToastOptions('error'));
+                    return;
+                }
+            }
+            if (!fileUrl) {
+                toast.error(t('files.failedToLoadFile') || 'File URL not available', ToastOptions('error'));
+                return;
+            }
+            Representation(fileUrl, resolvedType, false);
             closeSidebar();
         } else {
-            const fileName = file?.fileName || file?.name;
-            const fileId = file?._id || file?.id;
-            // Guard against undefined fileName or fileId
             if (!fileName || !fileId) {
                 console.error('Cannot open file: missing name or id', { fileName, fileId, file });
                 return;
@@ -156,7 +168,6 @@ export default function Sidenav({ role }) {
             closeSidebar();
         }
     };
-
     const handleFolderClick = (folder, e) => {
         if (e) {
             e.preventDefault();
@@ -213,11 +224,12 @@ export default function Sidenav({ role }) {
                     }));
                     
                     if (open) {
-                        userService.getFolderFiles(folderId, null, Token.MegaBox)
-                        .then((data) => {
+                        getAllUnifiedItems(Token.MegaBox, { folderId })
+                        .then((items) => {
+                            const filesOnly = items.filter(item => !item.isFolder && item.itemType !== 'folder');
                             setFolderFiles(prev => ({
                                 ...prev,
-                                [folderId]: data?.files || []
+                                [folderId]: filesOnly
                             }));
                         })
                         .catch(() => {

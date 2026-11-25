@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo } from 'react'
+import { createElement, lazy, Suspense, useMemo } from 'react'
 import { BrowserRouter as Router, Routes, Route, createBrowserRouter, RouterProvider, useNavigate, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import LanguageRoute from './components/LanguageRoute/LanguageRoute'
@@ -16,24 +16,12 @@ import ZipContents from './pages/Files/ZipContents/ZipContents'
 import LoginProtector from './protectors/LoginProtector'
 import Profile from './pages/profile/Profile'
 import RoleProtector from './protectors/RoleProtector'
-import Users from './pages/OwnerPages/Users/Users'
-import Analasys from './pages/OwnerPages/Analasyis/Analasys'
-import Payments from './pages/OwnerPages/Payments/Payments'
-import AdminPaymentServices from './pages/OwnerPages/PaymentServices/AdminPaymentServices'
-import Plans from './pages/OwnerPages/Plans/Plans'
-import AdminSubscriptions from './pages/OwnerPages/Subscriptions/AdminSubscriptions'
-import Storage from './pages/OwnerPages/Storage/Storage'
-import Withdrawals from './pages/OwnerPages/Withdrawals/Withdrawals'
-import UserStats from './pages/OwnerPages/UserStats/UserStats'
-import DownloadsViews from './pages/OwnerPages/DownloadsViews/DownloadsViews'
 import { useCookies } from 'react-cookie'
 import { jwtDecode } from 'jwt-decode'
 import LandingLayout from './pages/LandingLayout'
 
 import VideoPreview from './pages/VideoPreview/VideoPreview'
 import Earning from './pages/Earning/Earning'
-import Promoters from './pages/OwnerPages/Promoters/Promoters'
-import PromotersEarning from './pages/Earning/PromotersEarning'
 import Notifications from './pages/Notifications/Notifications'
 import PromoterDashboard from './pages/Promoter/PromoterDashboard'
 import SharedFiles from './pages/SharedFiles/SharedFiles'
@@ -44,7 +32,38 @@ import PromoterWithPlanProtector from './protectors/PromoterWithPlanProtector'
 import Channels from './pages/Channels/Channels'
 import ChannelFiles from './pages/Channels/ChannelFiles'
 import PromoterChannels from './pages/Channels/PromoterChannels'
-import SubscriptionPlans from './pages/SubscriptionPlans/SubscriptionPlans'
+
+// Staff dashboard (/Owner, Owner + Admin)
+const Analasys = lazy(() => import('./pages/OwnerPages/Analasyis/Analasys'))
+const Users = lazy(() => import('./pages/OwnerPages/Users/Users'))
+const UserDetail = lazy(() => import('./pages/OwnerPages/Users/UserDetail'))
+const UserStats = lazy(() => import('./pages/OwnerPages/UserStats/UserStats'))
+const Storage = lazy(() => import('./pages/OwnerPages/Storage/Storage'))
+const Promoters = lazy(() => import('./pages/OwnerPages/Promoters/Promoters'))
+const PromoterDetail = lazy(() => import('./pages/OwnerPages/Promoters/PromoterDetail'))
+const Reports = lazy(() => import('./pages/OwnerPages/Reports/Reports'))
+const ReportDetail = lazy(() => import('./pages/OwnerPages/Reports/ReportDetail'))
+const Complaints = lazy(() => import('./pages/OwnerPages/Complaints/Complaints'))
+const ComplaintDetail = lazy(() => import('./pages/OwnerPages/Complaints/ComplaintDetail'))
+const AdminShares = lazy(() => import('./pages/OwnerPages/Shares/AdminShares'))
+const AdminShareDetail = lazy(() => import('./pages/OwnerPages/Shares/AdminShareDetail'))
+const AdminChannels = lazy(() => import('./pages/OwnerPages/Channels/AdminChannels'))
+const AdminChannelDetail = lazy(() => import('./pages/OwnerPages/Channels/AdminChannelDetail'))
+const AdminFiles = lazy(() => import('./pages/OwnerPages/Files/AdminFiles'))
+const AdminFileDetail = lazy(() => import('./pages/OwnerPages/Files/AdminFileDetail'))
+const AdminFolders = lazy(() => import('./pages/OwnerPages/Folders/AdminFolders'))
+const AdminFolderDetail = lazy(() => import('./pages/OwnerPages/Folders/AdminFolderDetail'))
+const AdminNotifications = lazy(() => import('./pages/OwnerPages/Notifications/AdminNotifications'))
+const Withdrawals = lazy(() => import('./pages/OwnerPages/Withdrawals/Withdrawals'))
+const Plans = lazy(() => import('./pages/OwnerPages/Plans/Plans'))
+const AdminSubscriptions = lazy(() => import('./pages/OwnerPages/Subscriptions/AdminSubscriptions'))
+const AdminWheel = lazy(() => import('./pages/OwnerPages/Wheel/AdminWheel'))
+const AdminCatalogs = lazy(() => import('./pages/OwnerPages/Catalogs/AdminCatalogs'))
+const AdminLegal = lazy(() => import('./pages/OwnerPages/Legal/AdminLegal'))
+const AdminAppConfig = lazy(() => import('./pages/OwnerPages/AppConfig/AdminAppConfig'))
+const AdminZips = lazy(() => import('./pages/OwnerPages/Zips/AdminZips'))
+const AdminOcr = lazy(() => import('./pages/OwnerPages/Ocr/AdminOcr'))
+const AdminPaymentMethods = lazy(() => import('./pages/OwnerPages/PaymentMethods/AdminPaymentMethods'))
 
 
 // Main Pages
@@ -62,8 +81,17 @@ const Premium = lazy(() => import('./pages/Premium/Premium'))
 
 import Loading from './components/Loading/Loading'
 import SignupForMoney from './pages/Auth/SignupForMoney'
-import Reports from './pages/OwnerPages/Reports/Reports'
 
+// Staff page element: signed in, Owner or Admin, lazily loaded.
+const staffPage = (page) => (
+  <LoginProtector>
+    <RoleProtector requiredRole="Staff">
+      <Suspense fallback={<Loading />}>
+        {createElement(page)}
+      </Suspense>
+    </RoleProtector>
+  </LoginProtector>
+);
 
 // AuthWrapper component - must be used within Router and AuthProvider context
 // This component will be rendered by RouterProvider, so hooks will work
@@ -105,6 +133,7 @@ const LoginRoute = () => (
                   navigate('/dashboard');
                   break;
                 case 'Owner':
+                case 'Admin':
                   navigate('/Owner/profile');
                   break;
                 default:
@@ -470,16 +499,6 @@ const AppRouter = () => {
             </LoginProtector>
         },
         {
-          path: "subscription-plans", element:
-            <LoginProtector>
-              <RoleProtectorWrapper requiredRole="User">
-                <Suspense fallback={<Loading />}>
-                  <SubscriptionPlans />
-                </Suspense>
-              </RoleProtectorWrapper>
-            </LoginProtector>
-        },
-        {
           path: "channels", element:
             <LoginProtector>
               <RoleProtectorWrapper requiredRole="User">
@@ -567,14 +586,6 @@ const AppRouter = () => {
             </LoginProtector>
         },
         {
-          path: "subscription-plans", element:
-            <LoginProtector>
-              <PromoterProtector>
-                <SubscriptionPlans />
-              </PromoterProtector>
-            </LoginProtector>
-        },
-        {
           path: "revenue-data", element:
             <LoginProtector>
               <PromoterProtector>
@@ -616,102 +627,43 @@ const AppRouter = () => {
     },
     // Promoter 
 
-    // Owner ////////////////////////////
+    // Staff (Owner + Admin) ////////////////////////////
     {
       path: "/Owner", element: <LoginProtector><DashboardLayout role={"Owner"} /> </LoginProtector>, children: [
-        {
-          index: true, element:
-            <LoginProtector>
-              <RoleProtectorWrapper requiredRole="Owner">
-                <Analasys />
-              </RoleProtectorWrapper>
-            </LoginProtector>
-        },
-        {
-          path: "Users", element:
-            <RoleProtectorWrapper requiredRole="Owner">
-              <LoginProtector>
-                <Users />
-              </LoginProtector>
-            </RoleProtectorWrapper>
-        },
-        {
-          path: "profile", element:
-            <LoginProtector>
-              <RoleProtectorWrapper requiredRole="Owner">
-                <Profile />
-              </RoleProtectorWrapper>
-            </LoginProtector>
-        }, {
-          path: "AllPromoters", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <Promoters />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "Promoter/:id", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <PromotersEarning />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "Reports", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <Reports />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "Payments", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <Payments />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "PaymentServices", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <AdminPaymentServices />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "Plans", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <Plans />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "Subscriptions", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <AdminSubscriptions />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "Storage", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <Storage />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "Withdrawals", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <Withdrawals />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "UserStats", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <UserStats />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }, {
-          path: "DownloadsViews", element: <LoginProtector>
-            <RoleProtectorWrapper requiredRole="Owner">
-              <DownloadsViews />
-            </RoleProtectorWrapper>
-          </LoginProtector>
-        }
+        { index: true, element: staffPage(Analasys) },
+        { path: "profile", element: staffPage(Profile) },
+        { path: "Users", element: staffPage(Users) },
+        { path: "Users/:id", element: staffPage(UserDetail) },
+        { path: "UserStats", element: staffPage(UserStats) },
+        { path: "Storage", element: staffPage(Storage) },
+        { path: "AllPromoters", element: staffPage(Promoters) },
+        { path: "Promoter/:id", element: staffPage(PromoterDetail) },
+        { path: "Reports", element: staffPage(Reports) },
+        { path: "Reports/:id", element: staffPage(ReportDetail) },
+        { path: "Complaints", element: staffPage(Complaints) },
+        { path: "Complaints/:id", element: staffPage(ComplaintDetail) },
+        { path: "Shares", element: staffPage(AdminShares) },
+        { path: "Shares/:id", element: staffPage(AdminShareDetail) },
+        { path: "Channels", element: staffPage(AdminChannels) },
+        { path: "Channels/:id", element: staffPage(AdminChannelDetail) },
+        { path: "Files", element: staffPage(AdminFiles) },
+        { path: "Files/:id", element: staffPage(AdminFileDetail) },
+        { path: "Folders", element: staffPage(AdminFolders) },
+        { path: "Folders/:id", element: staffPage(AdminFolderDetail) },
+        { path: "Notifications", element: staffPage(AdminNotifications) },
+        { path: "Withdrawals", element: staffPage(Withdrawals) },
+        { path: "PaymentMethods", element: staffPage(AdminPaymentMethods) },
+        { path: "Plans", element: staffPage(Plans) },
+        { path: "Subscriptions", element: staffPage(AdminSubscriptions) },
+        { path: "Wheel", element: staffPage(AdminWheel) },
+        { path: "Catalogs", element: staffPage(AdminCatalogs) },
+        { path: "Legal", element: staffPage(AdminLegal) },
+        { path: "AppConfig", element: staffPage(AdminAppConfig) },
+        { path: "Zips", element: staffPage(AdminZips) },
+        { path: "Ocr", element: staffPage(AdminOcr) },
       ]
     }
-    // Owner 
+    // Staff
 
   ]), []);
 

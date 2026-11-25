@@ -12,7 +12,20 @@ import {
     HiCreditCard,
     HiServer,
     HiArrowDownTray,
-    HiTv
+    HiTv,
+    HiFlag,
+    HiChatBubbleLeftRight,
+    HiLink,
+    HiDocument,
+    HiBell,
+    HiRectangleStack,
+    HiSparkles,
+    HiPhoto,
+    HiScale,
+    HiCog6Tooth,
+    HiArchiveBox,
+    HiDocumentMagnifyingGlass,
+    HiWallet
 } from "react-icons/hi2";
 import { useLanguage } from '../../context/LanguageContext';
 import './BottomNavigation.scss';
@@ -28,7 +41,8 @@ export default function BottomNavigation({ role, isPromoter, userData }) {
                 return [];
             }
 
-            if (isPromoter && (userData?.Downloadsplan === "true" || userData?.Downloadsplan === true || userData?.watchingplan === "true" || userData?.watchingplan === true)) {
+            const hasPromoterPlan = Boolean(userData?.promoterPlan);
+            if (hasPromoterPlan) {
                 return [
                     {
                         path: '/Promoter/revenue-data',
@@ -78,7 +92,7 @@ export default function BottomNavigation({ role, isPromoter, userData }) {
                 }
             ];
 
-            if (isPromoter && (userData?.Downloadsplan === "true" || userData?.Downloadsplan === true || userData?.watchingplan === "true" || userData?.watchingplan === true)) {
+            if (hasPromoterPlan) {
                 items.push({
                     path: '/Promoter/shared-files',
                     icon: HiShare,
@@ -102,7 +116,7 @@ export default function BottomNavigation({ role, isPromoter, userData }) {
                 });
             }
 
-            if (isPromoter && (userData?.Downloadsplan === "true" || userData?.Downloadsplan === true || userData?.watchingplan === "true" || userData?.watchingplan === true)) {
+            if (hasPromoterPlan) {
                 items.push({
                     path: '/Promoter/revenue-data',
                     icon: HiChartBar,
@@ -111,7 +125,7 @@ export default function BottomNavigation({ role, isPromoter, userData }) {
                 });
             }
 
-            if (isPromoter && (userData?.Downloadsplan === "true" || userData?.Downloadsplan === true || userData?.watchingplan === "true" || userData?.watchingplan === true)) {
+            if (hasPromoterPlan) {
                 items.push({
                     path: '/Promoter/Earnings',
                     icon: HiChartBar,
@@ -139,15 +153,27 @@ export default function BottomNavigation({ role, isPromoter, userData }) {
             return items;
         } else if (role === "Owner") {
             return [
-                { path: '/Owner', icon: HiChartBar, label: t("sidenav.analytics"), key: 'analytics' },
-                { path: '/Owner/Users', icon: HiUsers, label: t("sidenav.users"), key: 'users' },
-                { path: '/Owner/AllPromoters', icon: HiUserGroup, label: t("sidenav.promoters"), key: 'promoters' },
-                { path: '/Owner/Reports', icon: HiDocumentText, label: t("sidenav.reports"), key: 'reports' },
-                { path: '/Owner/Withdrawals', icon: HiCurrencyDollar, label: t("sidenav.withdrawals"), key: 'withdrawals' },
-                { path: '/Owner/Plans', icon: HiUserGroup, label: t("sidenav.plans") || "Plans", key: 'plans' },
-                { path: '/Owner/Subscriptions', icon: HiUserGroup, label: t("sidenav.subscriptions"), key: 'subscriptions' },
-                { path: '/Owner/Storage', icon: HiServer, label: t("sidenav.storage"), key: 'storage' },
-                { path: '/Owner/DownloadsViews', icon: HiArrowDownTray, label: t("sidenav.downloadsViews"), key: 'downloadsViews' },
+                { path: '/Owner', icon: HiChartBar, label: t("staffNav.analytics"), key: 'staffAnalytics', exact: true },
+                { path: '/Owner/Users', icon: HiUsers, label: t("staffNav.users"), key: 'staffUsers' },
+                { path: '/Owner/AllPromoters', icon: HiUserGroup, label: t("staffNav.promoters"), key: 'staffPromoters', match: ['/Owner/Promoter/'] },
+                { path: '/Owner/Reports', icon: HiFlag, label: t("staffNav.reports"), key: 'staffReports' },
+                { path: '/Owner/Complaints', icon: HiChatBubbleLeftRight, label: t("staffNav.complaints"), key: 'staffComplaints' },
+                { path: '/Owner/Shares', icon: HiLink, label: t("staffNav.shares"), key: 'staffShares' },
+                { path: '/Owner/Channels', icon: HiTv, label: t("staffNav.channels"), key: 'staffChannels' },
+                { path: '/Owner/Files', icon: HiDocument, label: t("staffNav.files"), key: 'staffFiles' },
+                { path: '/Owner/Folders', icon: HiFolder, label: t("staffNav.folders"), key: 'staffFolders' },
+                { path: '/Owner/Notifications', icon: HiBell, label: t("staffNav.notifications"), key: 'staffNotifications' },
+                { path: '/Owner/Withdrawals', icon: HiCurrencyDollar, label: t("staffNav.withdrawals"), key: 'staffWithdrawals' },
+                { path: '/Owner/PaymentMethods', icon: HiWallet, label: t("staffNav.paymentMethods"), key: 'staffPaymentMethods' },
+                { path: '/Owner/Plans', icon: HiRectangleStack, label: t("staffNav.plans"), key: 'staffPlans' },
+                { path: '/Owner/Subscriptions', icon: HiCreditCard, label: t("staffNav.subscriptions"), key: 'staffSubscriptions' },
+                { path: '/Owner/Storage', icon: HiServer, label: t("staffNav.storage"), key: 'staffStorage' },
+                { path: '/Owner/Wheel', icon: HiSparkles, label: t("staffNav.wheel"), key: 'staffWheel' },
+                { path: '/Owner/Catalogs', icon: HiPhoto, label: t("staffNav.catalogs"), key: 'staffCatalogs' },
+                { path: '/Owner/Legal', icon: HiScale, label: t("staffNav.legal"), key: 'staffLegal' },
+                { path: '/Owner/AppConfig', icon: HiCog6Tooth, label: t("staffNav.appConfig"), key: 'staffAppConfig' },
+                { path: '/Owner/Zips', icon: HiArchiveBox, label: t("staffNav.zips"), key: 'staffZips' },
+                { path: '/Owner/Ocr', icon: HiDocumentMagnifyingGlass, label: t("staffNav.ocr"), key: 'staffOcr' },
             ];
         }
         return [];
@@ -195,6 +221,8 @@ export default function BottomNavigation({ role, isPromoter, userData }) {
                    pathname === '/Promoter/channels/' ||
                    pathname.startsWith('/Promoter/channels/');
         }
+        if (item.match?.some((prefix) => pathname.startsWith(prefix))) return true;
+        if (item.exact) return pathname.replace(/\/$/, '') === item.path;
         return isPathActive(item.path, pathname, menuItems);
     };
 

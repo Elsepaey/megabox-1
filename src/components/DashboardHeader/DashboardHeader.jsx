@@ -117,10 +117,8 @@ export default function DashboardHeader() {
     const isOwner = location.pathname.startsWith('/Owner');
     // Check actual role from userData (role can be "User", "Promoter", or "Owner")
     const userRole = userData?.role || null;
-    // Check if user has plans (Users with role "User" can have plans like promoters)
-    const hasWatchingPlan = userData?.watchingplan === "true" || userData?.watchingplan === true;
-    const hasDownloadsPlan = userData?.Downloadsplan === "true" || userData?.Downloadsplan === true;
-    const hasAnyPlan = hasWatchingPlan || hasDownloadsPlan;
+    // Promoter plan from the profile (`promoterPlan`: 'views' | 'installs').
+    const hasAnyPlan = Boolean(userData?.promoterPlan);
     // Users with role "User" who have plans should see promoter-like menu items
     const isRegularUser = userRole === "User" && !isPromoter && !isOwner;
     const isUserWithPlan = isRegularUser && hasAnyPlan;

@@ -1,481 +1,297 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from 'react-query';
-import { useCookies } from 'react-cookie';
-// eslint-disable-next-line no-unused-vars
-import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
-import { adminService } from '../../../services/adminService';
-import { promoterService } from '../../../services/promoterService';
+import { FaChartBar, FaUsers, FaFlag, FaMoneyBillWave } from 'react-icons/fa';
 import { useLanguage } from '../../../context/LanguageContext';
-import StatCard from '../../../components/StatCard/StatCard';
-import { FaUsers, FaFileAlt, FaDollarSign, FaChartLine, FaDownload, FaEye, FaLink, FaMoneyBillWave, FaHdd, FaUserPlus, FaCrown } from 'react-icons/fa';
-import './Analasys.scss';
+import analyticsAdmin from '../../../services/admin/analyticsAdmin';
+import {
+    AdminCard,
+    AdminPage,
+    ErrorState,
+    LoadingState,
+    StatTile,
+} from '../_shared/AdminUI';
+import {
+    formatDay,
+    formatMb,
+    formatNumber,
+    todayIso,
+} from '../_shared/formatters';
 
-// cspell:ignore Analasys
-export default function Analasys() {
-    const { t } = useLanguage();
-    const navigate = useNavigate();
-    const [cookies] = useCookies(['MegaBox']);
-    const token = cookies.MegaBox;
+const OBJECT_ID_RE = /^[a-fA-F0-9]{24}$/;
+const MAX_RANGE_DAYS = 90;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-    // Fetch all users
-    const { data: usersData, isLoading: usersLoading } = useQuery(
-        ['allUsers'],
-        async () => {
-            const response = await adminService.getAllUsers(token);
-            return response?.message?.users || response?.data?.users || [];
-        },
-        { enabled: !!token }
-    );
-
-    // Fetch all withdrawals
-    const { data: withdrawalsData, isLoading: withdrawalsLoading } = useQuery(
-        ['allWithdrawals'],
-        () => adminService.getAllWithdrawals(token),
-        { enabled: !!token }
-    );
-
-    // Fetch approved withdrawals
-    const { data: approvedWithdrawalsData, isLoading: approvedWithdrawalsLoading } = useQuery(
-        ['approvedWithdrawals'],
-        () => adminService.getApprovedWithdrawals(token),
-        { enabled: !!token }
-    );
-
-    // Fetch all promoters
-    const { data: promotersData, isLoading: promotersLoading } = useQuery(
-        ['allPromoters'],
-        async () => {
-            try {
-                const response = await promoterService.getAllPromoters(token);
-                // Handle different response structures
-                if (Array.isArray(response)) {
-                    return response;
-                }
-                if (response?.promoters && Array.isArray(response.promoters)) {
-                    return response.promoters;
-                }
-                if (response?.data?.promoters && Array.isArray(response.data.promoters)) {
-                    return response.data.promoters;
-                }
-                if (response?.data && Array.isArray(response.data)) {
-                    return response.data;
-                }
-                return [];
-            } catch (error) {
-                console.error('Error fetching promoters:', error);
-                return [];
-            }
-        },
-        { enabled: !!token }
-    );
-
-    // Fetch user statistics
-    const { data: userStatsData, isLoading: userStatsLoading } = useQuery(
-        ['userStats'],
-        () => adminService.getUserStats(token),
-        { enabled: !!token }
-    );
-
-    // Fetch platform statistics including downloads and views from all promoters
-    const { data: platformStats, isLoading: platformStatsLoading } = useQuery(
-        ['platformStats', promotersData],
-        async () => {
-            try {
-                // Normalize promotersData to ensure it's always an array
-                const promotersArray = Array.isArray(promotersData) 
-                    ? promotersData 
-                    : (promotersData?.promoters && Array.isArray(promotersData.promoters))
-                        ? promotersData.promoters
-                        : (promotersData?.data?.promoters && Array.isArray(promotersData.data.promoters))
-                            ? promotersData.data.promoters
-                            : [];
-
-                // Use getAllStorageStats for storage statistics
-                const storageStats = await adminService.getAllStorageStats(token);
-                // Calculate total storage from storage stats
-                let totalStorageGB = 0;
-                
-                // Handle different response structures (matching Storage page format)
-                if (storageStats?.stats?.totalUsedSpaceMB !== undefined) {
-                    // Format: { stats: { totalUsedSpaceMB: ... } }
-                    // totalUsedSpaceMB is in MB, convert to GB
-                    totalStorageGB = storageStats.stats.totalUsedSpaceMB / 1024;
-                } else if (storageStats?.data?.stats?.totalUsedSpaceMB !== undefined) {
-                    // Nested format: { data: { stats: { totalUsedSpaceMB: ... } } }
-                    totalStorageGB = storageStats.data.stats.totalUsedSpaceMB / 1024;
-                } else if (storageStats?.totalUsedSpaceMB !== undefined) {
-                    // Direct format: { totalUsedSpaceMB: ... }
-                    totalStorageGB = storageStats.totalUsedSpaceMB / 1024;
-                } else if (storageStats?.storage && Array.isArray(storageStats.storage)) {
-                    // Old format: { storage: [...] }
-                    totalStorageGB = storageStats.storage.reduce((sum, item) => {
-                        const total = item.totalStorage || 0;
-                        // Convert bytes to GB if needed (assuming bytes if > 1MB)
-                        const totalGB = total > 1000000 ? total / (1024 * 1024 * 1024) : total;
-                        return sum + totalGB;
-                    }, 0);
-                } else if (storageStats?.data?.storage && Array.isArray(storageStats.data.storage)) {
-                    // Nested old format: { data: { storage: [...] } }
-                    totalStorageGB = storageStats.data.storage.reduce((sum, item) => {
-                        const total = item.totalStorage || 0;
-                        const totalGB = total > 1000000 ? total / (1024 * 1024 * 1024) : total;
-                        return sum + totalGB;
-                    }, 0);
-                }
-                
-                // Log for debugging
-                if (totalStorageGB === 0) {
-                    console.log('Storage stats response:', storageStats);
-                }
-                
-                // Calculate promoters with plans
-                const promotersWithPlansCount = promotersArray.filter(p =>
-                    p.Downloadsplan === "true" || p.Downloadsplan === true ||
-                    p.watchingplan === "true" || p.watchingplan === true
-                ).length;
-
-                // Fetch downloads and views from all promoters
-                let totalDownloads = 0;
-                let totalViews = 0;
-                
-                if (promotersArray && promotersArray.length > 0) {
-                    // Fetch analytics for all promoters in parallel
-                    const promoterPromises = promotersArray
-                        .filter(promoter => promoter._id || promoter.id || promoter.userId)
-                        .map(async (promoter) => {
-                            const userId = promoter._id || promoter.id || promoter.userId;
-                            if (!userId) return { downloads: 0, views: 0 };
-                            
-                            try {
-                                const response = await adminService.getShareLinkAnalyticdownloads(userId, token);
-                                
-                                // Extract analytics data from response
-                                let analyticsData = [];
-                                
-                                if (response.analytics && Array.isArray(response.analytics)) {
-                                    analyticsData = response.analytics;
-                                } else if (response.downloadsViews && Array.isArray(response.downloadsViews)) {
-                                    analyticsData = response.downloadsViews;
-                                } else if (response.data && Array.isArray(response.data)) {
-                                    analyticsData = response.data;
-                                } else if (Array.isArray(response)) {
-                                    analyticsData = response;
-                                }
-
-                                // Sum downloads and views for this promoter
-                                const promoterDownloads = analyticsData.reduce((sum, item) => {
-                                    return sum + (item.downloads || item.totalDownloads || 0);
-                                }, 0);
-                                
-                                const promoterViews = analyticsData.reduce((sum, item) => {
-                                    return sum + (item.views || item.totalViews || 0);
-                                }, 0);
-
-                                return { downloads: promoterDownloads, views: promoterViews };
-                            } catch (error) {
-                                // Only log non-404 errors (404 means user has no shared files, which is expected)
-                                if (error?.response?.status !== 404 && error?.status !== 404) {
-                                    console.error(`Error fetching analytics for promoter ${userId}:`, error);
-                                }
-                                return { downloads: 0, views: 0 };
-                            }
-                        });
-
-                    // Wait for all promises to resolve
-                    const allPromoterStats = await Promise.all(promoterPromises);
-                    
-                    // Aggregate all downloads and views
-                    totalDownloads = allPromoterStats.reduce((sum, stat) => sum + stat.downloads, 0);
-                    totalViews = allPromoterStats.reduce((sum, stat) => sum + stat.views, 0);
-                }
-
-                return {
-                    totalStorage: Math.round(totalStorageGB * 100) / 100, // Round to 2 decimal places
-                    totalPayments: 0, // Will be calculated from paymentsData
-                    totalSubscriptions: promotersWithPlansCount,
-                    totalDownloads: totalDownloads,
-                    totalViews: totalViews
-                };
-            } catch (error) {
-                console.error('Error fetching platform stats:', error);
-                // Calculate promoters with plans even on error
-                // Normalize promotersData to ensure it's always an array
-                const promotersArray = Array.isArray(promotersData) 
-                    ? promotersData 
-                    : (promotersData?.promoters && Array.isArray(promotersData.promoters))
-                        ? promotersData.promoters
-                        : (promotersData?.data?.promoters && Array.isArray(promotersData.data.promoters))
-                            ? promotersData.data.promoters
-                            : [];
-                const promotersWithPlansCount = promotersArray.filter(p =>
-                    p.Downloadsplan === "true" || p.Downloadsplan === true ||
-                    p.watchingplan === "true" || p.watchingplan === true
-                ).length;
-                
-                // Try to get storage stats even on error
-                let totalStorageGB = 0;
-                try {
-                    const storageStats = await adminService.getAllStorageStats(token);
-                    if (storageStats?.stats?.totalUsedSpaceMB !== undefined) {
-                        totalStorageGB = storageStats.stats.totalUsedSpaceMB / 1024;
-                    } else if (storageStats?.data?.stats?.totalUsedSpaceMB !== undefined) {
-                        totalStorageGB = storageStats.data.stats.totalUsedSpaceMB / 1024;
-                    } else if (storageStats?.totalUsedSpaceMB !== undefined) {
-                        totalStorageGB = storageStats.totalUsedSpaceMB / 1024;
-                    }
-                } catch (storageError) {
-                    console.error('Error fetching storage stats in error handler:', storageError);
-                }
-                
-                return {
-                    totalStorage: Math.round(totalStorageGB * 100) / 100,
-                    totalPayments: 0,
-                    totalSubscriptions: promotersWithPlansCount,
-                    totalDownloads: 0,
-                    totalViews: 0
-                };
-            }
-        },
-        { enabled: !!token && !!promotersData }
-    );
-
-    const isLoading = usersLoading || withdrawalsLoading || approvedWithdrawalsLoading || promotersLoading || platformStatsLoading || userStatsLoading;
-
-    // Normalize promotersData to ensure it's always an array
-    const normalizedPromotersData = useMemo(() => {
-        if (Array.isArray(promotersData)) {
-            return promotersData;
-        }
-        if (promotersData?.promoters && Array.isArray(promotersData.promoters)) {
-            return promotersData.promoters;
-        }
-        if (promotersData?.data?.promoters && Array.isArray(promotersData.data.promoters)) {
-            return promotersData.data.promoters;
-        }
-        return [];
-    }, [promotersData]);
-
-    // Normalize withdrawalsData to ensure it's always an array
-    const normalizedWithdrawalsData = useMemo(() => {
-        if (Array.isArray(withdrawalsData)) {
-            return withdrawalsData;
-        }
-        if (withdrawalsData?.withdrawals && Array.isArray(withdrawalsData.withdrawals)) {
-            return withdrawalsData.withdrawals;
-        }
-        if (withdrawalsData?.data?.withdrawals && Array.isArray(withdrawalsData.data.withdrawals)) {
-            return withdrawalsData.data.withdrawals;
-        }
-        if (withdrawalsData?.data && Array.isArray(withdrawalsData.data)) {
-            return withdrawalsData.data;
-        }
-        return [];
-    }, [withdrawalsData]);
-
-    // Normalize approved withdrawals data to ensure it's always an array
-    const normalizedApprovedWithdrawalsData = useMemo(() => {
-        if (Array.isArray(approvedWithdrawalsData)) {
-            return approvedWithdrawalsData;
-        }
-        if (approvedWithdrawalsData?.withdrawals && Array.isArray(approvedWithdrawalsData.withdrawals)) {
-            return approvedWithdrawalsData.withdrawals;
-        }
-        if (approvedWithdrawalsData?.data?.withdrawals && Array.isArray(approvedWithdrawalsData.data.withdrawals)) {
-            return approvedWithdrawalsData.data.withdrawals;
-        }
-        if (approvedWithdrawalsData?.data && Array.isArray(approvedWithdrawalsData.data)) {
-            return approvedWithdrawalsData.data;
-        }
-        return [];
-    }, [approvedWithdrawalsData]);
-
-    // Calculate statistics
-    const totalUsers = usersData?.length || 0;
-    const totalPromoters = normalizedPromotersData.length || 0;
-    const totalWithdrawals = normalizedWithdrawalsData.length || 0;
-    const totalWithdrawalAmount = normalizedWithdrawalsData.reduce((sum, w) => sum + (parseFloat(w.amount) || 0), 0) || 0;
-    const pendingWithdrawals = normalizedWithdrawalsData.filter(w => w.status === 'pending')?.length || 0;
-    const approvedWithdrawals = normalizedApprovedWithdrawalsData.length || 0;
-    const currency = normalizedWithdrawalsData[0]?.currency || 'USD';
-
-    // Calculate promoter statistics
-    const promotersWithPlans = normalizedPromotersData.filter(p =>
-        p.Downloadsplan === "true" || p.Downloadsplan === true ||
-        p.watchingplan === "true" || p.watchingplan === true
-    ).length;
-
-    // Calculate new users (last 30 days)
-    const newUsers = useMemo(() => {
-        if (!usersData) return 0;
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        return usersData.filter(user => {
-            const createdAt = user.createdAt || user.created_at || user.dateCreated;
-            if (!createdAt) return false;
-            return new Date(createdAt) >= thirtyDaysAgo;
-        }).length;
-    }, [usersData]);
-
-    // Platform statistics
-    const totalStorage = platformStats?.totalStorage || 0; // GB
-    const totalSubscriptions = platformStats?.totalSubscriptions !== undefined ? platformStats.totalSubscriptions : promotersWithPlans; // Fallback to promoters with plans
-    const totalDownloads = platformStats?.totalDownloads || 0;
-    const totalViews = platformStats?.totalViews || 0;
-
-
-    return (
-        <div className="admin-analytics-page">
-            <div className="admin-analytics-page__wrapper">
-                {/* Header */}
-                <motion.div
-                    className="admin-analytics-header"
-                    initial={{ opacity: 0, y: -20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5 }}
-                >
-                    <div className="admin-analytics-header__content">
-                        <FaChartLine className="admin-analytics-header__icon" />
-                        <div>
-                            <h1 className="admin-analytics-header__title">{t('adminAnalytics.title')}</h1>
-                            <p className="admin-analytics-header__subtitle">{t('adminAnalytics.subtitle')}</p>
-                        </div>
-                    </div>
-                </motion.div>
-
-                {/* Stats Grid */}
-                {isLoading ? (
-                    <div className="admin-analytics-skeleton">
-                        {[...Array(13)].map((_, i) => (
-                            <div key={i} className="skeleton-card"></div>
-                        ))}
-                    </div>
-                ) : (
-                    <motion.div
-                        className="admin-analytics-stats"
-                        variants={containerVariants}
-                        initial="hidden"
-                        animate="visible"
-                    >
-                        <StatCard
-                            label={t('adminAnalytics.totalUsers')}
-                            value={totalUsers}
-                            icon={<FaUsers />}
-                            color="#6366f1"
-                            index={0}
-                            onClick={() => navigate('/Owner/Users')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.newUsers')}
-                            value={newUsers}
-                            icon={<FaUserPlus />}
-                            color="#06b6d4"
-                            index={1}
-                            onClick={() => navigate('/Owner/Users')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.totalPromoters')}
-                            value={totalPromoters}
-                            icon={<FaUsers />}
-                            color="#10b981"
-                            index={2}
-                            onClick={() => navigate('/Owner/AllPromoters')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.promotersWithPlans')}
-                            value={promotersWithPlans}
-                            icon={<FaUsers />}
-                            color="#f59e0b"
-                            index={3}
-                            onClick={() => navigate('/Owner/Subscriptions')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.totalStorage')}
-                            value={`${totalStorage} GB`}
-                            icon={<FaHdd />}
-                            color="#3b82f6"
-                            index={4}
-                            onClick={() => navigate('/Owner/Storage')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.totalSubscriptions')}
-                            value={totalSubscriptions}
-                            icon={<FaCrown />}
-                            color="#f59e0b"
-                            index={5}
-                            onClick={() => navigate('/Owner/Subscriptions')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.totalDownloads')}
-                            value={totalDownloads}
-                            icon={<FaDownload />}
-                            color="#10b981"
-                            index={6}
-                            onClick={() => navigate('/Owner/DownloadsViews')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.totalViews')}
-                            value={totalViews}
-                            icon={<FaEye />}
-                            color="#ef4444"
-                            index={7}
-                            onClick={() => navigate('/Owner/DownloadsViews')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.totalWithdrawals')}
-                            value={totalWithdrawals}
-                            icon={<FaMoneyBillWave />}
-                            color="#ef4444"
-                            index={8}
-                            onClick={() => navigate('/Owner/Withdrawals')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.totalWithdrawalAmount')}
-                            value={`${totalWithdrawalAmount.toFixed(2)} ${currency}`}
-                            icon={<FaDollarSign />}
-                            color="#8b5cf6"
-                            index={9}
-                            onClick={() => navigate('/Owner/Withdrawals')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.pendingWithdrawals')}
-                            value={pendingWithdrawals}
-                            icon={<FaChartLine />}
-                            color="#f59e0b"
-                            index={10}
-                            onClick={() => navigate('/Owner/Withdrawals')}
-                        />
-                        <StatCard
-                            label={t('adminAnalytics.approvedWithdrawals')}
-                            value={approvedWithdrawals}
-                            icon={<FaChartLine />}
-                            color="#10b981"
-                            index={11}
-                            onClick={() => navigate('/Owner/Withdrawals')}
-                        />
-                        {userStatsData && (
-                            <StatCard
-                                label={t('adminAnalytics.userStats') || 'User Statistics'}
-                                value={userStatsData?.totalUsers || userStatsData?.count || Object.keys(userStatsData || {}).length || 0}
-                                icon={<FaUsers />}
-                                color="#9333ea"
-                                index={13}
-                                onClick={() => navigate('/Owner/UserStats')}
-                            />
-                        )}
-                    </motion.div>
-                )}
-            </div>
-        </div>
-    );
+function defaultRange() {
+    return {
+        from: todayIso(-29),
+        to: todayIso(1),
+        fileId: '',
+        ownerId: '',
+    };
 }
 
-const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-        opacity: 1,
-        transition: {
-            staggerChildren: 0.1
-        }
+function validateRange(form, t) {
+    if (!form.from || !form.to) return t('staffAnalytics.invalidRangeRequired');
+    const fromMs = Date.parse(`${form.from}T00:00:00Z`);
+    const toMs = Date.parse(`${form.to}T00:00:00Z`);
+    if (Number.isNaN(fromMs) || Number.isNaN(toMs) || toMs <= fromMs) {
+        return t('staffAnalytics.invalidRangeOrder');
     }
-};
+    if ((toMs - fromMs) / MS_PER_DAY > MAX_RANGE_DAYS) {
+        return t('staffAnalytics.invalidRangeMax');
+    }
+    const trimmedFileId = form.fileId.trim();
+    if (trimmedFileId && !OBJECT_ID_RE.test(trimmedFileId)) {
+        return `${t('staffAnalytics.fileId')}: ${t('staffAnalytics.invalidObjectId')}`;
+    }
+    const trimmedOwnerId = form.ownerId.trim();
+    if (trimmedOwnerId && !OBJECT_ID_RE.test(trimmedOwnerId)) {
+        return `${t('staffAnalytics.ownerId')}: ${t('staffAnalytics.invalidObjectId')}`;
+    }
+    return null;
+}
+
+export default function Analasys() {
+    const { t, language } = useLanguage();
+    const [form, setForm] = useState(defaultRange);
+    const [applied, setApplied] = useState(defaultRange);
+    const [formError, setFormError] = useState(null);
+
+    const userStatsQuery = useQuery(
+        ['staff:analytics:userStats'],
+        analyticsAdmin.getUserStats,
+        { retry: false, refetchOnWindowFocus: false },
+    );
+
+    const storageStatsQuery = useQuery(
+        ['staff:analytics:storageStats'],
+        analyticsAdmin.getStorageStats,
+        { retry: false, refetchOnWindowFocus: false },
+    );
+
+    const summaryParams = useMemo(
+        () => ({
+            from: applied.from,
+            to: applied.to,
+            fileId: applied.fileId.trim(),
+            ownerId: applied.ownerId.trim(),
+        }),
+        [applied],
+    );
+
+    const summaryQuery = useQuery(
+        ['staff:analytics:summary', summaryParams],
+        () => analyticsAdmin.getSummary(summaryParams),
+        { retry: false, refetchOnWindowFocus: false, keepPreviousData: true },
+    );
+
+    const userStats = userStatsQuery.data?.data;
+    const storageStats = storageStatsQuery.data?.stats;
+    const summary = summaryQuery.data;
+
+    const handleSubmit = (event) => {
+        event.preventDefault();
+        const error = validateRange(form, t);
+        setFormError(error);
+        if (!error) {
+            setApplied({ ...form });
+        }
+    };
+
+    const handleReset = () => {
+        const next = defaultRange();
+        setForm(next);
+        setApplied(next);
+        setFormError(null);
+    };
+
+    return (
+        <AdminPage
+            icon={FaChartBar}
+            title={t('staffAnalytics.title')}
+            subtitle={t('staffAnalytics.subtitle')}
+            actions={
+                <>
+                    <Link to="/Owner/Users" className="admin-btn admin-btn--secondary admin-btn--sm">
+                        <FaUsers /> {t('staffAnalytics.manageUsers')}
+                    </Link>
+                    <Link to="/Owner/Reports" className="admin-btn admin-btn--secondary admin-btn--sm">
+                        <FaFlag /> {t('staffAnalytics.reviewReports')}
+                    </Link>
+                    <Link to="/Owner/Withdrawals" className="admin-btn admin-btn--primary admin-btn--sm">
+                        <FaMoneyBillWave /> {t('staffAnalytics.processWithdrawals')}
+                    </Link>
+                </>
+            }
+        >
+            <AdminCard title={t('staffAnalytics.usersSection')}>
+                {userStatsQuery.isLoading ? (
+                    <LoadingState />
+                ) : userStatsQuery.error ? (
+                    <ErrorState error={userStatsQuery.error} onRetry={userStatsQuery.refetch} />
+                ) : (
+                    <div className="admin-stat-grid">
+                        <StatTile
+                            label={t('staffAnalytics.totalUsers')}
+                            value={formatNumber(userStats?.totalUsers, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.newUsers30d')}
+                            value={formatNumber(userStats?.usersLast30Days, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.promotersCount')}
+                            value={formatNumber(userStats?.promotersCount, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.premiumUsers')}
+                            value={formatNumber(userStats?.brimumeCount, language)}
+                        />
+                    </div>
+                )}
+            </AdminCard>
+
+            <AdminCard title={t('staffAnalytics.storageSection')}>
+                {storageStatsQuery.isLoading ? (
+                    <LoadingState />
+                ) : storageStatsQuery.error ? (
+                    <ErrorState error={storageStatsQuery.error} onRetry={storageStatsQuery.refetch} />
+                ) : (
+                    <div className="admin-stat-grid">
+                        <StatTile
+                            label={t('staffAnalytics.totalFiles')}
+                            value={formatNumber(storageStats?.totalFiles, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.completedFiles')}
+                            value={formatNumber(storageStats?.completedFiles, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.totalFolders')}
+                            value={formatNumber(storageStats?.totalFolders, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.sharedFiles')}
+                            value={formatNumber(storageStats?.sharedFiles, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.uniqueSharedUsers')}
+                            value={formatNumber(storageStats?.uniqueSharedUsers, language)}
+                        />
+                        <StatTile
+                            label={t('staffAnalytics.totalUsedSpace')}
+                            value={formatMb(storageStats?.totalUsedSpaceMB)}
+                        />
+                    </div>
+                )}
+            </AdminCard>
+
+            <AdminCard
+                title={t('staffAnalytics.rangeTitle')}
+                actions={
+                    <button
+                        type="button"
+                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        onClick={handleReset}
+                    >
+                        {t('staffAnalytics.resetRange')}
+                    </button>
+                }
+            >
+                <form className="admin-form" onSubmit={handleSubmit}>
+                    <div className="admin-form-grid">
+                        <label className="admin-field">
+                            <span className="admin-field__label">{t('staffAnalytics.from')}</span>
+                            <input
+                                type="date"
+                                className="admin-input"
+                                value={form.from}
+                                onChange={(e) => setForm((prev) => ({ ...prev, from: e.target.value }))}
+                                required
+                            />
+                        </label>
+                        <label className="admin-field">
+                            <span className="admin-field__label">{t('staffAnalytics.to')}</span>
+                            <input
+                                type="date"
+                                className="admin-input"
+                                value={form.to}
+                                onChange={(e) => setForm((prev) => ({ ...prev, to: e.target.value }))}
+                                required
+                            />
+                        </label>
+                        <label className="admin-field">
+                            <span className="admin-field__label">{t('staffAnalytics.fileId')}</span>
+                            <input
+                                type="text"
+                                className="admin-input"
+                                placeholder={t('staffAnalytics.idPlaceholder')}
+                                value={form.fileId}
+                                onChange={(e) => setForm((prev) => ({ ...prev, fileId: e.target.value }))}
+                            />
+                        </label>
+                        <label className="admin-field">
+                            <span className="admin-field__label">{t('staffAnalytics.ownerId')}</span>
+                            <input
+                                type="text"
+                                className="admin-input"
+                                placeholder={t('staffAnalytics.idPlaceholder')}
+                                value={form.ownerId}
+                                onChange={(e) => setForm((prev) => ({ ...prev, ownerId: e.target.value }))}
+                            />
+                        </label>
+                    </div>
+
+                    {formError && <p className="admin-field__error">{formError}</p>}
+
+                    <div>
+                        <button type="submit" className="admin-btn admin-btn--primary admin-btn--sm">
+                            {t('staffAnalytics.apply')}
+                        </button>
+                    </div>
+                </form>
+
+                <div style={{ marginTop: '1.25rem' }}>
+                    {summaryQuery.isLoading ? (
+                        <LoadingState />
+                    ) : summaryQuery.error ? (
+                        <ErrorState error={summaryQuery.error} onRetry={summaryQuery.refetch} />
+                    ) : (
+                        <>
+                            <div className="admin-stat-grid">
+                                <StatTile
+                                    label={t('staffAnalytics.views')}
+                                    value={formatNumber(summary?.totals?.views, language)}
+                                    hint={
+                                        summary?.from && summary?.to
+                                            ? t('staffAnalytics.resolvedRange', {
+                                                  from: formatDay(summary.from, language),
+                                                  to: formatDay(summary.to, language),
+                                              })
+                                            : undefined
+                                    }
+                                />
+                                <StatTile
+                                    label={t('staffAnalytics.downloads')}
+                                    value={formatNumber(summary?.totals?.downloads, language)}
+                                    hint={
+                                        summary?.from && summary?.to
+                                            ? t('staffAnalytics.resolvedRange', {
+                                                  from: formatDay(summary.from, language),
+                                                  to: formatDay(summary.to, language),
+                                              })
+                                            : undefined
+                                    }
+                                />
+                            </div>
+                            <p className="admin-field__hint" style={{ alignSelf: 'flex-start', margin: 0 }}>
+                                {t('staffAnalytics.viewLogHint')}
+                            </p>
+                        </>
+                    )}
+                </div>
+            </AdminCard>
+        </AdminPage>
+    );
+}

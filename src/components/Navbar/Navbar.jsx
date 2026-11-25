@@ -10,6 +10,7 @@ import { useLanguage } from '../../context/LanguageContext'
 import { toast } from 'react-toastify'
 import { ToastOptions } from '../../helpers/ToastOptions'
 import ThemeToggle from '../ThemeToggle/ThemeToggle'
+import { isStaffRole } from '../../utils/roles'
 
 const Navbar = () => {
 
@@ -58,7 +59,7 @@ const Navbar = () => {
   const navigate = useNavigate();
 
   const DashboardTravel = () => {
-    if (UserRole === "Owner") {
+    if (isStaffRole(UserRole)) {
       navigate("/Owner")
     } else {
       navigate("/dashboard")

@@ -1,41 +1,40 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from 'react';
 // eslint-disable-next-line no-unused-vars
-import { motion, AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
-import { useCookies } from "react-cookie";
-import { FaCheckCircle } from "react-icons/fa";
-import api from "../../services/api";
-import { promoterService } from "../../services/api";
-import Loading from "../Loading/Loading";
-import { useLanguage } from "../../context/LanguageContext";
-import TermsModal from "../TermsModal/TermsModal";
-import './PartnerCta.scss'
+import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+import { useCookies } from 'react-cookie';
+import { useQueryClient } from 'react-query';
+import { FaCheckCircle } from 'react-icons/fa';
+import { toast } from 'react-toastify';
+import { api } from '../../services/apiConfig';
+import { promoterService } from '../../services/api';
+import { ToastOptions } from '../../helpers/ToastOptions';
+import Loading from '../Loading/Loading';
+import { useLanguage } from '../../context/LanguageContext';
+import './PartnerCta.scss';
 
+function getApiError(error, fallback) {
+    const msg = error?.response?.data?.message;
+    if (Array.isArray(msg)) return msg.join('\n');
+    return msg || error?.message || fallback;
+}
 
-export default function PartnerCTA({ isModal = false, onClose }) {
+export default function PartnerCTA({ isModal = false, onClose, onEnrolled }) {
     const [userData, setUserData] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [showTermsModal, setShowTermsModal] = useState(false);
     const [selectedPlan, setSelectedPlan] = useState(null);
-    const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
-    const [subscriptionForm, setSubscriptionForm] = useState({
-        invoiceFile: null,
-        phone: '',
-        subscriberName: '',
-        planName: '',
-        durationDays: ''
-    });
+    const [showEnrollModal, setShowEnrollModal] = useState(false);
+    const [policy, setPolicy] = useState(null);
+    const [policyLoading, setPolicyLoading] = useState(false);
+    const [policyError, setPolicyError] = useState(null);
+    const [agreedPolicy, setAgreedPolicy] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const navigate = useNavigate();
-    const [cookies] = useCookies(["MegaBox"]);
-    const { t } = useLanguage();
 
-    // Always use fallback cards for promoter plans (watching and download)
-    // This ensures we only show promoter plans, not subscription plans
-    // The "Start as Promoter" button should show watching and download plans only
-    const plansLoading = false; // No need to load plans, we use fallback cards
-    
-    // Promoter plans cards (watching and download only)
+    const navigate = useNavigate();
+    const [cookies] = useCookies(['MegaBox']);
+    const queryClient = useQueryClient();
+    const { t, language } = useLanguage();
+
     const cards = [
         {
             title: t('partners.plans.viewsPlan.title'),
@@ -45,10 +44,10 @@ export default function PartnerCTA({ isModal = false, onClose }) {
                 t('partners.plans.viewsPlan.feature3'),
                 t('partners.plans.viewsPlan.feature4'),
                 t('partners.plans.viewsPlan.feature5'),
-                t('partners.plans.viewsPlan.feature6')
+                t('partners.plans.viewsPlan.feature6'),
             ],
             smallDesc: t('partners.plans.viewsPlan.desc'),
-            planKey: "watchingplan"
+            planKey: 'views',
         },
         {
             title: t('partners.plans.downloadsPlan.title'),
@@ -58,135 +57,116 @@ export default function PartnerCTA({ isModal = false, onClose }) {
                 t('partners.plans.downloadsPlan.feature3'),
                 t('partners.plans.downloadsPlan.feature4'),
                 t('partners.plans.downloadsPlan.feature5'),
-                t('partners.plans.downloadsPlan.feature6')
+                t('partners.plans.downloadsPlan.feature6'),
             ],
             smallDesc: t('partners.plans.downloadsPlan.desc'),
-            planKey: "Downloadsplan"
-        }
+            planKey: 'installs',
+        },
     ];
 
-    useEffect(() => {
-        const isLoggedIn = cookies.MegaBox && cookies.MegaBox !== 'undefined' && cookies.MegaBox !== 'null' && cookies.MegaBox.trim() !== '';
-        
-        if (!isModal) {
-            if (isLoggedIn) {
-                fetchUserData();
-            } else {
-                setUserData(null);
-                setLoading(false);
-            }
-        } else {
-            // For modal, fetch user data if token exists
-            if (isLoggedIn) {
-                fetchUserData();
-            } else {
-                setUserData(null);
-                setLoading(false);
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isModal, cookies.MegaBox]);
-
-    const fetchUserData = async () => {
+    const fetchUserData = useCallback(async () => {
         try {
-            const response = await api.get('/users/profile', {
-                headers: {
-                    Authorization: `Bearer ${cookies.MegaBox}`
-                }
-            });
-            setUserData(response.data.data);
-            setLoading(false);
+            const response = await api.get('/users/profile');
+            setUserData(response.data?.data || null);
         } catch (error) {
             console.error('Error fetching user data:', error);
+            setUserData(null);
+        } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    const handleSubscribe = async (plan) => {
-        // Check if user is logged in properly
+    useEffect(() => {
+        const token = cookies.MegaBox;
+        const isLoggedIn =
+            typeof token === 'string' &&
+            token.trim() !== '' &&
+            token !== 'undefined' &&
+            token !== 'null';
+
+        if (isLoggedIn) {
+            fetchUserData();
+        } else {
+            setUserData(null);
+            setLoading(false);
+        }
+    }, [cookies.MegaBox, fetchUserData]);
+
+    const loadPromoterPolicy = useCallback(async () => {
+        setPolicyLoading(true);
+        setPolicyError(null);
+        try {
+            const res = await promoterService.getPromoterPrivacyPolicy(language);
+            setPolicy(res?.policy || null);
+        } catch (error) {
+            setPolicy(null);
+            setPolicyError(
+                getApiError(error, t('payouts.policyUnavailable') || 'No active promoter privacy policy found.'),
+            );
+        } finally {
+            setPolicyLoading(false);
+        }
+    }, [language, t]);
+
+    const handleChoosePlan = async (plan) => {
         const token = cookies?.MegaBox;
-        const isLoggedIn = token && 
-                          token !== 'undefined' && 
-                          token !== 'null' && 
-                          typeof token === 'string' && 
-                          token.trim().length > 0;
-        
-        // Debug: Log token status
-        console.log('PartnerCTA - Token check:', { token, isLoggedIn, cookies });
-        
+        const isLoggedIn =
+            typeof token === 'string' &&
+            token.trim().length > 0 &&
+            token !== 'undefined' &&
+            token !== 'null';
+
         if (!isLoggedIn) {
-            // If modal is open from landing page, close it and navigate to login
             if (isModal && onClose) {
                 onClose();
             }
-            navigate("/login");
+            navigate('/login');
             return;
         }
-        
-        // Check if user has already accepted terms
-        const termsAccepted = localStorage.getItem('termsAccepted');
-        
-        if (!termsAccepted) {
-            // Show terms modal first
-            setSelectedPlan(plan);
-            setShowTermsModal(true);
-            return;
-        }
-        
-        // If terms already accepted, show subscription form
+
         setSelectedPlan(plan);
-        setShowSubscriptionModal(true);
+        setAgreedPolicy(false);
+        setShowEnrollModal(true);
+        await loadPromoterPolicy();
     };
 
-    const handleSubscriptionSubmit = async (e) => {
+    const handleEnrollSubmit = async (e) => {
         e.preventDefault();
-        
-        if (!subscriptionForm.phone || !subscriptionForm.subscriberName || !selectedPlan) {
-            return;
-        }
+        if (!selectedPlan || !policy?.version || !agreedPolicy) return;
 
         setIsSubmitting(true);
         try {
-            const plan = selectedPlan;
-            await promoterService.createSubscription(
-                subscriptionForm.invoiceFile,
-                subscriptionForm.phone,
-                subscriptionForm.subscriberName,
-                plan.planDays || plan.days || 30,
-                plan.planKey || plan.name || plan.planName,
-                cookies.MegaBox
-            );
-            
-            await fetchUserData(); // Refresh user data after subscription
-            setShowSubscriptionModal(false);
-            setSubscriptionForm({
-                invoiceFile: null,
-                phone: '',
-                subscriberName: '',
-                planName: '',
-                durationDays: ''
+            const res = await promoterService.enrollPromoter({
+                plan: selectedPlan.planKey,
+                promoterPrivacyPolicyVersion: Number(policy.version),
             });
+
+            toast.success(
+                res?.message || t('payouts.enrollSuccess') || 'Enrolled as promoter successfully',
+                ToastOptions('success'),
+            );
+
+            await fetchUserData();
+            queryClient.invalidateQueries(['userAccount']);
+            queryClient.invalidateQueries(['promoterStats']);
+            queryClient.invalidateQueries(['promoterShares']);
+            if (onEnrolled) {
+                await onEnrolled();
+            }
+
+            setShowEnrollModal(false);
+            setSelectedPlan(null);
+            setAgreedPolicy(false);
             if (isModal && onClose) {
                 onClose();
             }
         } catch (error) {
-            console.error('Error creating subscription:', error);
+            toast.error(
+                getApiError(error, t('partners.submitting') || 'Enrollment failed'),
+                ToastOptions('error'),
+            );
         } finally {
             setIsSubmitting(false);
-        }
-    };
-
-    const handleFileChange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            setSubscriptionForm(prev => ({ ...prev, invoiceFile: file }));
-        }
-    };
-
-    const handleTermsAccept = () => {
-        if (selectedPlan) {
-            setShowTermsModal(false);
-            setShowSubscriptionModal(true);
         }
     };
 
@@ -194,53 +174,39 @@ export default function PartnerCTA({ isModal = false, onClose }) {
         return <Loading />;
     }
 
-    const hasNoPlans = !userData || (!userData?.watchingplan && !userData?.Downloadsplan);
+    const isEnrolled = userData?.isPromoter === true;
+    const activePlan = userData?.promoterPlan;
 
     return (
         <>
-            <TermsModal
-                isOpen={showTermsModal}
-                onClose={() => {
-                    setShowTermsModal(false);
-                    setSelectedPlan(null);
-                }}
-                onAccept={handleTermsAccept}
-            />
             <section className={`partner-cta ${isModal ? 'partner-cta--modal' : ''}`}>
                 <div className="partner-cta__container">
-                <motion.h2
-                    initial={{ opacity: 0, y: 30 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.7, ease: "easeOut" }}
-                    className="partner-cta__title"
-                >
-                    {hasNoPlans ? t('partners.selectPlan') : t('partners.alreadySubscribed')}
-                </motion.h2>
+                    <motion.h2
+                        initial={{ opacity: 0, y: 30 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ duration: 0.7, ease: 'easeOut' }}
+                        className="partner-cta__title"
+                    >
+                        {!isEnrolled ? t('partners.selectPlan') : t('partners.alreadySubscribed')}
+                    </motion.h2>
 
-                {hasNoPlans ? (
-                    plansLoading ? (
-                        <div className="partner-cta__loading">
-                            <Loading />
-                        </div>
-                    ) : (
+                    {!isEnrolled ? (
                         <div className="partner-cta__cards">
                             {cards.map((card, idx) => (
                                 <motion.div
-                                    key={card.planId || card.planKey || idx}
+                                    key={card.planKey}
                                     initial={{ y: 20, opacity: 0 }}
                                     whileInView={{ y: 0, opacity: 1 }}
                                     viewport={{ once: true }}
                                     transition={{ duration: 0.5, delay: idx * 0.2 }}
                                     className={`partner-cta__card partner-cta__card--${idx % 2 === 0 ? 'purple' : 'orange'}`}
                                 >
-                                    {/* Card Header */}
                                     <div className="partner-cta__card-header">
                                         <h3 className="partner-cta__card-title">{card.title}</h3>
                                         <p className="partner-cta__card-desc">{card.smallDesc}</p>
                                     </div>
 
-                                    {/* Card Content */}
                                     <div className="partner-cta__card-content">
                                         <ul className="partner-cta__features">
                                             {card.features.map((feature, i) => (
@@ -251,7 +217,8 @@ export default function PartnerCTA({ isModal = false, onClose }) {
                                             ))}
                                         </ul>
                                         <button
-                                            onClick={() => handleSubscribe(card)}
+                                            type="button"
+                                            onClick={() => handleChoosePlan(card)}
                                             className={`partner-cta__button partner-cta__button--${idx % 2 === 0 ? 'purple' : 'orange'}`}
                                         >
                                             {t('partners.choosePlan')}
@@ -260,107 +227,160 @@ export default function PartnerCTA({ isModal = false, onClose }) {
                                 </motion.div>
                             ))}
                         </div>
-                    )
-                ) : (
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        transition={{ duration: 0.5 }}
-                        className="partner-cta__subscribed"
-                    >
-                        <div className="partner-cta__subscribed-message">
-                            <p className="partner-cta__subscribed-desc">
-                                {userData?.watchingplan && userData?.Downloadsplan 
-                                    ? t('partners.subscribedBothPlans') || 'أنت مشترك في كلا الخطتين'
-                                    : userData?.watchingplan 
-                                        ? t('partners.subscribedViewsPlan') || 'أنت مشترك في خطة المشاهدات'
-                                        : t('partners.subscribedDownloadsPlan') || 'أنت مشترك في خطة التحميلات'
-                                }
-                            </p>
-                        </div>
-                        <button
-                            onClick={() => {
-                                if (onClose) onClose();
-                                navigate('/Promoter/Earnings');
-                            }}
-                            className="partner-cta__dashboard-button"
+                    ) : (
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ duration: 0.5 }}
+                            className="partner-cta__subscribed"
                         >
-                            {t('partners.seeDashboard')}
-                        </button>
+                            <div className="partner-cta__subscribed-message">
+                                <p className="partner-cta__subscribed-desc">
+                                    {activePlan === 'views'
+                                        ? t('partners.subscribedViewsPlan') || t('payouts.planViews')
+                                        : activePlan === 'installs'
+                                          ? t('partners.subscribedDownloadsPlan') || t('payouts.planInstalls')
+                                          : t('partners.alreadySubscribed')}
+                                </p>
+                                {userData?.promoterCode && (
+                                    <p style={{ marginTop: '0.5rem', fontSize: '0.9rem', opacity: 0.85 }}>
+                                        {t('payouts.promoterCode')}: <strong>{userData.promoterCode}</strong>
+                                    </p>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (onClose) onClose();
+                                    navigate('/Promoter/Earnings');
+                                }}
+                                className="partner-cta__dashboard-button"
+                            >
+                                {t('partners.seeDashboard')}
+                            </button>
+                        </motion.div>
+                    )}
+                </div>
+            </section>
+
+            {/* Promoter Enrollment & Privacy Policy Modal */}
+            <AnimatePresence>
+                {showEnrollModal && selectedPlan && (
+                    <motion.div
+                        className="partner-cta__subscription-modal"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setShowEnrollModal(false)}
+                    >
+                        <motion.div
+                            className="partner-cta__subscription-modal-content"
+                            initial={{ scale: 0.9, y: 20 }}
+                            animate={{ scale: 1, y: 0 }}
+                            exit={{ scale: 0.9, y: 20 }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <button
+                                type="button"
+                                className="partner-cta__subscription-modal-close"
+                                onClick={() => setShowEnrollModal(false)}
+                            >
+                                ×
+                            </button>
+                            <h3 className="partner-cta__subscription-modal-title">
+                                {t('payouts.enrollTitle') || 'Join the Promoter Program'}
+                            </h3>
+                            <p className="partner-cta__subscription-modal-subtitle">
+                                {t('partners.selectedPlan') || 'Selected Plan'}: {selectedPlan.title}
+                            </p>
+
+                            <form onSubmit={handleEnrollSubmit} className="partner-cta__subscription-form">
+                                {policyLoading ? (
+                                    <p style={{ textAlign: 'center', color: '#6b7280', margin: '1rem 0' }}>
+                                        {t('payouts.policyLoading') || 'Loading promoter privacy policy...'}
+                                    </p>
+                                ) : policyError || !policy ? (
+                                    <p style={{ color: '#dc2626', fontSize: '0.9rem', margin: '0.5rem 0' }}>
+                                        {policyError || t('payouts.policyUnavailable')}
+                                    </p>
+                                ) : (
+                                    <>
+                                        {Array.isArray(policy.sections) && policy.sections.length > 0 && (
+                                            <div
+                                                style={{
+                                                    maxHeight: '220px',
+                                                    overflowY: 'auto',
+                                                    border: '1px solid #e5e7eb',
+                                                    borderRadius: '0.5rem',
+                                                    padding: '0.75rem 1rem',
+                                                    background: '#f9fafb',
+                                                    fontSize: '0.875rem',
+                                                    lineHeight: 1.5,
+                                                }}
+                                            >
+                                                {policy.sections.map((section, sIdx) => (
+                                                    <div key={sIdx} style={{ marginBottom: '0.75rem' }}>
+                                                        <h4 style={{ margin: '0 0 0.35rem', fontWeight: 700 }}>
+                                                            {section.title}
+                                                        </h4>
+                                                        {(section.items || []).map((item, iIdx) => (
+                                                            <div key={iIdx} style={{ marginBottom: '0.35rem' }}>
+                                                                {item.heading && (
+                                                                    <strong style={{ display: 'block' }}>{item.heading}</strong>
+                                                                )}
+                                                                {item.type === 'list' && Array.isArray(item.points) ? (
+                                                                    <ul style={{ margin: '0.2rem 0 0.2rem 1.2rem', padding: 0 }}>
+                                                                        {item.points.map((pt, pIdx) => (
+                                                                            <li key={pIdx}>{pt}</li>
+                                                                        ))}
+                                                                    </ul>
+                                                                ) : (
+                                                                    item.body && <p style={{ margin: 0 }}>{item.body}</p>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <label
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem',
+                                                fontSize: '0.9rem',
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={agreedPolicy}
+                                                onChange={(e) => setAgreedPolicy(e.target.checked)}
+                                                required
+                                            />
+                                            <span>
+                                                {t('payouts.enrollPolicyAgree', { version: policy.version })}
+                                            </span>
+                                        </label>
+                                    </>
+                                )}
+
+                                <button
+                                    type="submit"
+                                    className="partner-cta__subscription-submit"
+                                    disabled={isSubmitting || policyLoading || !policy?.version || !agreedPolicy}
+                                >
+                                    {isSubmitting
+                                        ? t('payouts.enrolling') || 'Enrolling...'
+                                        : t('payouts.enrollButton') || 'Enroll as Promoter'}
+                                </button>
+                            </form>
+                        </motion.div>
                     </motion.div>
                 )}
-            </div>
-        </section>
-
-        {/* Subscription Modal */}
-        <AnimatePresence>
-            {showSubscriptionModal && selectedPlan && (
-                <motion.div
-                    className="partner-cta__subscription-modal"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    onClick={() => setShowSubscriptionModal(false)}
-                >
-                <motion.div
-                    className="partner-cta__subscription-modal-content"
-                    initial={{ scale: 0.9, y: 20 }}
-                    animate={{ scale: 1, y: 0 }}
-                    exit={{ scale: 0.9, y: 20 }}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <button
-                        className="partner-cta__subscription-modal-close"
-                        onClick={() => setShowSubscriptionModal(false)}
-                    >
-                        ×
-                    </button>
-                    <h3 className="partner-cta__subscription-modal-title">
-                        {t('partners.createSubscription') || 'Create Subscription'}
-                    </h3>
-                    <p className="partner-cta__subscription-modal-subtitle">
-                        {t('partners.selectedPlan') || 'Selected Plan'}: {selectedPlan.title || selectedPlan.name}
-                    </p>
-                    <form onSubmit={handleSubscriptionSubmit} className="partner-cta__subscription-form">
-                        <div className="partner-cta__form-group">
-                            <label>{t('partners.subscriberName') || 'Subscriber Name'}</label>
-                            <input
-                                type="text"
-                                value={subscriptionForm.subscriberName}
-                                onChange={(e) => setSubscriptionForm(prev => ({ ...prev, subscriberName: e.target.value }))}
-                                required
-                            />
-                        </div>
-                        <div className="partner-cta__form-group">
-                            <label>{t('partners.phone') || 'Phone Number'}</label>
-                            <input
-                                type="tel"
-                                value={subscriptionForm.phone}
-                                onChange={(e) => setSubscriptionForm(prev => ({ ...prev, phone: e.target.value }))}
-                                required
-                            />
-                        </div>
-                        <div className="partner-cta__form-group">
-                            <label>{t('partners.invoice') || 'Invoice (Optional)'}</label>
-                            <input
-                                type="file"
-                                accept="image/*,.pdf"
-                                onChange={handleFileChange}
-                            />
-                        </div>
-                        <button
-                            type="submit"
-                            className="partner-cta__subscription-submit"
-                            disabled={isSubmitting}
-                        >
-                            {isSubmitting ? (t('partners.submitting') || 'Submitting...') : (t('partners.submitSubscription') || 'Submit Subscription')}
-                        </button>
-                    </form>
-                </motion.div>
-            </motion.div>
-            )}
-        </AnimatePresence>
+            </AnimatePresence>
         </>
     );
 }

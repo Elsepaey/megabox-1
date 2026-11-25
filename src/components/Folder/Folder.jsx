@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { FiMoreVertical, FiArchive } from 'react-icons/fi';
-import { HiTrash, HiPencil, HiShare } from "react-icons/hi2";
-import { LuFolder, LuFileArchive } from "react-icons/lu";
+import { HiTrash, HiPencil, HiShare, HiLinkSlash } from "react-icons/hi2";
+import { LuFolder } from "react-icons/lu";
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../helpers/ToastOptions';
 import { useLanguage } from '../../context/LanguageContext';
 import { useCookies } from 'react-cookie';
 import { useQueryClient } from 'react-query';
-import { userService, fileService } from '../../services/api';
+import { userService } from '../../services/api';
 
-export const Folder = ({ name, data, onRename, onDelete, onShare, onArchive, isSelectionMode, isSelected, onToggleSelect, refetch }) => {
+export const Folder = ({ name, data, onRename, onDelete, onShare, onDisableShare, onArchive, isSelectionMode, isSelected, onToggleSelect, refetch, readOnly = false }) => {
     const [open, setOpen] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
     const menuRef = useRef(null);
@@ -19,7 +19,6 @@ export const Folder = ({ name, data, onRename, onDelete, onShare, onArchive, isS
     const { pathname } = useLocation();
     const [Token] = useCookies(['MegaBox']);
     const queryClient = useQueryClient();
-    
     // Determine base path based on current location
     const getBasePath = () => {
         if (pathname.startsWith('/Promoter')) {
@@ -54,46 +53,24 @@ export const Folder = ({ name, data, onRename, onDelete, onShare, onArchive, isS
         };
     }, [showMenu]);
 
-    const handleDisableShare = async () => {
-        try {
-            await userService.disableFolderShare(data?._id || data?.id, Token.MegaBox);
-            // Invalidate shared files and folders queries to remove disabled items from shared lists
-            queryClient.invalidateQueries(['sharedFilesByUser']);
-            queryClient.invalidateQueries('GetSharedFolders');
-            // Also invalidate share link analytics to update the shared links table
-            queryClient.invalidateQueries(['shareLinkAnalytics']);
-            // Refetch current folder list if refetch function is provided
-            if (refetch) {
-                refetch();
-            }
-        } catch {
-            // Error is handled in the service
-        }
-    };
 
     const handleUnarchive = async () => {
         try {
             await userService.unarchiveFolder(data?._id || data?.id, Token.MegaBox);
             toast.success("Folder unarchived successfully", ToastOptions("success"));
+            queryClient.invalidateQueries({ queryKey: ["items"] });
+            queryClient.invalidateQueries({ queryKey: ["userFolders"] });
+            queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
+            queryClient.invalidateQueries({ queryKey: ["getMyArchives"] });
+            queryClient.invalidateQueries({
+                predicate: (query) =>
+                    typeof query.queryKey?.[0] === 'string' && query.queryKey[0].startsWith('GetUserFile-')
+            });
             if (refetch) {
                 refetch();
             }
         } catch {
             toast.error("Failed to unarchive folder", ToastOptions("error"));
-        }
-    };
-
-    const handleCreateZip = async () => {
-        try {
-            const items = [{ type: "folder", id: data?._id || data?.id }];
-            await fileService.createZip(items, Token.MegaBox);
-            // Invalidate queries to refresh the file list
-            queryClient.invalidateQueries(["GetUserFiles"]);
-            if (refetch) {
-                refetch();
-            }
-        } catch {
-            // Error is handled in the service
         }
     };
 
@@ -104,32 +81,36 @@ export const Folder = ({ name, data, onRename, onDelete, onShare, onArchive, isS
 
         switch (action) {
             case 'rename':
-                onRename(name, false, data?._id, true);
+                if (onRename) onRename(name, false, data?._id, true);
                 break;
             case 'delete':
-                onDelete(data?._id);
+                if (onDelete) onDelete(data?._id);
                 break;
             case 'share':
-                onShare(data?._id);
+                if (onShare) onShare(data?._id);
                 break;
             case 'disableShare':
-                await handleDisableShare();
+                if (onDisableShare) await onDisableShare(data?._id || data?.id);
                 break;
             case 'archive':
-                if (onArchive) {
-                    onArchive(data?._id);
-                }
+                if (onArchive) onArchive(data?._id);
                 break;
             case 'unarchive':
                 await handleUnarchive();
-                break;
-            case 'createZip':
-                await handleCreateZip();
                 break;
             default:
                 break;
         }
     };
+
+    const isArchived = data?.archived === true || data?.isArchived === true;
+    const isShared = Boolean(data?.isShared);
+    const canRename = !readOnly && Boolean(onRename);
+    const canShare = !readOnly && Boolean(onShare);
+    const canDisableShare = !readOnly && isShared && Boolean(onDisableShare);
+    const canArchiveAction = !readOnly && (isArchived || Boolean(onArchive));
+    const canDelete = !readOnly && Boolean(onDelete);
+    const hasMenuActions = canRename || canShare || canDisableShare || canArchiveAction || canDelete;
 
     return (
         <div className={`relative bg-gradient-to-br from-white to-indigo-50 rounded-lg border-2 ${isSelected ? 'border-indigo-600 bg-indigo-100' : 'border-indigo-200'} shadow-md hover:shadow-xl transition-all duration-300 hover:border-indigo-400 hover:scale-[1.01] sm:hover:scale-[1.02] h-auto self-start`} style={{ zIndex: 1, position: 'relative', isolation: 'isolate' }}>
@@ -171,46 +152,50 @@ export const Folder = ({ name, data, onRename, onDelete, onShare, onArchive, isS
                         <h4 className="font-bold text-indigo-900 truncate text-sm sm:text-base md:text-lg group-hover:text-indigo-700 transition-colors duration-300" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
                             {name}
                         </h4>
-                        <p className="text-xs text-indigo-500 mt-0.5 sm:mt-1">{t("folder.folder")}</p>
+                        <div className="flex items-center gap-2 mt-0.5 sm:mt-1 flex-wrap">
+                            <p className="text-xs text-indigo-500">{t("folder.folder")}</p>
+                            {isShared && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-indigo-100 text-indigo-700">
+                                    <HiShare className="w-3 h-3" />
+                                    {t("filesV2.sharedBadge") || "Shared"}
+                                </span>
+                            )}
+                        </div>
                     </div>
                 </div>
             </Link>
 
-            <div
-                ref={buttonRef}
-                className={`absolute top-1.5 sm:top-2 z-10 ${language === 'ar' ? 'left-1.5 sm:left-2' : 'right-1.5 sm:right-2'}`}
-                onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setShowMenu(!showMenu);
-                }}
-            >
-                <FiMoreVertical className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 cursor-pointer hover:text-indigo-800 transition-colors" />
-            </div>
+            {hasMenuActions && (
+                <div
+                    ref={buttonRef}
+                    className={`absolute top-1.5 sm:top-2 z-10 ${language === 'ar' ? 'left-1.5 sm:left-2' : 'right-1.5 sm:right-2'}`}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowMenu(!showMenu);
+                    }}
+                >
+                    <FiMoreVertical className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-600 cursor-pointer hover:text-indigo-800 transition-colors" />
+                </div>
+            )}
 
-            {showMenu && (
+            {showMenu && hasMenuActions && (
                 <div
                     ref={menuRef}
                     className={`absolute top-8 sm:top-10 bg-white border-2 border-indigo-100 shadow-xl rounded-lg py-1.5 text-xs min-w-[160px] max-h-[280px] overflow-y-auto file-dropdown-menu ${language === 'ar' ? 'left-1.5 sm:left-2' : 'right-1.5 sm:right-2'}`}
                     style={{ zIndex: 999999 }}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <button
-                        onClick={(e) => handleAction('rename', e)}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
-                    >
-                        <HiPencil className='w-4 h-4 text-green-600 flex-shrink-0' />
-                        <span className="font-medium">{t("folder.rename")}</span>
-                    </button>
-                    {(data?.shareLink || data?.shareUrl || data?.isShared === true || data?.isShared === "true" || data?.shared === true || data?.shared === "true") ? (
+                    {canRename && (
                         <button
-                            onClick={(e) => handleAction('disableShare', e)}
-                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-orange-50 w-full text-left transition-colors text-orange-600"
+                            onClick={(e) => handleAction('rename', e)}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
                         >
-                            <HiShare className='w-4 h-4 text-orange-600 rotate-180 flex-shrink-0' />
-                            <span className="font-medium">{t("folder.disableShare") || "Disable Share"}</span>
+                            <HiPencil className='w-4 h-4 text-green-600 flex-shrink-0' />
+                            <span className="font-medium">{t("folder.rename")}</span>
                         </button>
-                    ) : (
+                    )}
+                    {canShare && (
                         <button
                             onClick={(e) => handleAction('share', e)}
                             className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
@@ -219,7 +204,16 @@ export const Folder = ({ name, data, onRename, onDelete, onShare, onArchive, isS
                             <span className="font-medium">{t("folder.share")}</span>
                         </button>
                     )}
-                    {(data?.archived === true || data?.isArchived === true) ? (
+                    {canDisableShare && (
+                        <button
+                            onClick={(e) => handleAction('disableShare', e)}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-amber-50 w-full text-left transition-colors text-amber-700"
+                        >
+                            <HiLinkSlash className='w-4 h-4 text-amber-600 flex-shrink-0' />
+                            <span className="font-medium">{t("filesV2.disableSharing") || "Disable sharing"}</span>
+                        </button>
+                    )}
+                    {canArchiveAction && (isArchived ? (
                         <button
                             onClick={(e) => handleAction('unarchive', e)}
                             className="flex items-center gap-2 px-3 py-1.5 hover:bg-green-50 w-full text-left transition-colors text-green-600"
@@ -228,33 +222,26 @@ export const Folder = ({ name, data, onRename, onDelete, onShare, onArchive, isS
                             <span className="font-medium">{t("folder.unarchive") || "Unarchive"}</span>
                         </button>
                     ) : (
+                        <button
+                            onClick={(e) => handleAction('archive', e)}
+                            className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
+                        >
+                            <FiArchive className='w-4 h-4 text-purple-600 flex-shrink-0' />
+                            <span className="font-medium">{t("folder.archive")}</span>
+                        </button>
+                    ))}
+                    {canDelete && (
                         <>
+                            <div className="border-t border-gray-200 my-1"></div>
                             <button
-                                onClick={(e) => handleAction('createZip', e)}
-                                className="flex items-center gap-2 px-3 py-1.5 hover:bg-amber-50 w-full text-left transition-colors text-amber-600"
+                                onClick={(e) => handleAction('delete', e)}
+                                className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 w-full text-left transition-colors text-red-600"
                             >
-                                <LuFileArchive className='w-4 h-4 text-amber-600 flex-shrink-0' />
-                                <span className="font-medium">{t("folder.createZip") || "Create Zip"}</span>
+                                <HiTrash className='w-4 h-4 text-red-600 flex-shrink-0' />
+                                <span className="font-medium">{t("folder.delete")}</span>
                             </button>
-                            {onArchive && (
-                                <button
-                                    onClick={(e) => handleAction('archive', e)}
-                                    className="flex items-center gap-2 px-3 py-1.5 hover:bg-indigo-50 w-full text-left transition-colors text-indigo-900"
-                                >
-                                    <FiArchive className='w-4 h-4 text-purple-600 flex-shrink-0' />
-                                    <span className="font-medium">{t("folder.archive")}</span>
-                                </button>
-                            )}
                         </>
                     )}
-                    <div className="border-t border-gray-200 my-1"></div>
-                    <button
-                        onClick={(e) => handleAction('delete', e)}
-                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 w-full text-left transition-colors text-red-600"
-                    >
-                        <HiTrash className='w-4 h-4 text-red-600 flex-shrink-0' />
-                        <span className="font-medium">{t("folder.delete")}</span>
-                    </button>
                 </div>
             )}
         </div>

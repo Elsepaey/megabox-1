@@ -77,18 +77,21 @@ export async function getFileDetails(token, fileId) {
 
 export async function getVideoStatus(token, fileId) {
     try {
-        const { data } = await api.get(`/files/${fileId}/status`, authHeaders(token));
-        return data;
+        const data = await getFileDetails(token, fileId);
+        return {
+            _id: data?._id || fileId,
+            streamUid: data?.streamUid,
+            readyToStream: Boolean(data?.accessUrl),
+            status: { state: data?.accessUrl ? 'ready' : 'processing' },
+            playback: { hls: data?.accessUrl },
+        };
     } catch (err) {
-        if (err?.response?.status === 404) {
-            // Fallback to file details — server may infer readiness from accessUrl.
-            const data = await getFileDetails(token, fileId);
+        if (err?.response?.status === 400) {
             return {
-                _id: data?._id || fileId,
-                streamUid: data?.streamUid,
-                readyToStream: data?.readyToStream ?? Boolean(data?.accessUrl),
-                status: data?.status || (data?.readyToStream ? { state: 'ready' } : null),
-                playback: { hls: data?.accessUrl },
+                _id: fileId,
+                readyToStream: false,
+                status: { state: 'processing' },
+                playback: { hls: null },
             };
         }
         throw err;
@@ -160,30 +163,6 @@ export async function getAllUnifiedItems(token, { type, folderId, limit = 50 } =
     return allItems;
 }
 
-/**
- * Adapter that returns the legacy `{ files: [...] }` shape that older
- * components expect. Pulls all pages for the requested type.
- *
- * @deprecated Use getAllUnifiedItems() instead for new code
- */
-export async function getAllItemsLegacyShape(token, { type, folderId, limit = 50 } = {}) {
-    const files = [];
-    const folders = [];
-    let page = 1;
-    let totalPages = 1;
-
-    do {
-        const { items, meta } = await getItems(token, { page, limit, type, folderId });
-        for (const item of items) {
-            if (item.isFolder) folders.push(item);
-            else files.push(item);
-        }
-        totalPages = meta?.totalPages ?? 1;
-        page += 1;
-    } while (page <= totalPages);
-
-    return { files, folders };
-}
 
 export const itemsService = {
     getItems,
@@ -192,5 +171,4 @@ export const itemsService = {
     getVideoStatus,
     pollVideoStatus,
     getAllUnifiedItems,
-    getAllItemsLegacyShape,
 };

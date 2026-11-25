@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useQuery } from "react-query";
 import { useFormik } from "formik";
 import * as Yup from "yup";
 // eslint-disable-next-line no-unused-vars
@@ -6,8 +7,7 @@ import { motion } from "framer-motion";
 import { FiSend, FiDownload, FiUpload, FiAlertTriangle, FiFileText, FiUser, FiMail, FiMapPin, FiCheckCircle } from "react-icons/fi";
 import { toast } from "react-toastify";
 import { Link } from "react-router-dom";
-import axios from "axios";
-import { API_URL } from "../../services/api";
+import { api } from "../../services/apiConfig";
 import { useCookies } from "react-cookie";
 import { ToastOptions } from "../../helpers/ToastOptions";
 import { useLanguage } from "../../context/LanguageContext";
@@ -45,65 +45,49 @@ export default function Feedback() {
 
     const [SendDataLoading, setSendDataLoading] = useState(false)
 
+    // Active complaint types (localized) — the report is filed as a complaint.
+    const { data: complaintTypes = [] } = useQuery(
+        ['complainTypes', language],
+        async () => (await api.get('/complain/types', { params: { lang: language } })).data?.types ?? [],
+        { staleTime: 5 * 60 * 1000 },
+    );
+
     const SendComp = async (values) => {
+        if (!MegaBox.MegaBox) {
+            toast.error(t('feedback.loginRequired'), ToastOptions("error"));
+            return;
+        }
+
+        setSendDataLoading(true);
         try {
-            console.log('Form submission started with values:', values);
-            
-            if (!MegaBox.MegaBox) {
-                toast.error(t('feedback.loginRequired'), ToastOptions("error"));
-                return;
-            }
-
-            // Validate required fields
-            if (!values.file) {
-                toast.error(t('feedback.fileRequired') || 'Please upload a file', ToastOptions("error"));
-                return;
-            }
-
-            setSendDataLoading(true);
+            const description = [
+                `Infringing URL: ${values.copyrightUrl}`,
+                `Rights owner: ${values.copyrightOwnerName}`,
+                `Relationship to content: ${values.relationshipWithContent}`,
+                `Phone: ${values.phoneNumber}`,
+                `Address: ${values.streetAddress}, ${values.city}, ${values.province}, ${values.postalCode}, ${values.country}`,
+                `Signature: ${values.signature}`,
+                `Good-faith statement accepted: ${values.agreement ? 'yes' : 'no'}`,
+            ].join('\n');
 
             const formData = new FormData();
-
-            formData.append("type", values.type);
-            formData.append("copyrightUrl", values.copyrightUrl);
-            formData.append("file", values.file); // file is already a File object
-            formData.append("copyrightOwnerName", values.copyrightOwnerName);
-            formData.append("relationshipWithContent", values.relationshipWithContent);
+            formData.append("typeId", values.type);
+            formData.append("description", description);
             formData.append("email", values.email);
-            formData.append("phoneNumber", values.phoneNumber);
-            formData.append("country", values.country);
-            formData.append("province", values.province);
-            formData.append("streetAddress", values.streetAddress);
-            formData.append("city", values.city);
-            formData.append("postalCode", values.postalCode);
-            formData.append("signature", values.signature);
-            formData.append("agreement", values.agreement.toString());
+            formData.append("images", values.file);
 
-            const { data } = await axios.post(`${API_URL}/auth/report`, formData, {
-                headers: {
-                    Authorization: `Bearer ${MegaBox.MegaBox}`,
-                    'Content-Type': 'multipart/form-data'
-                }
+            await api.post('/complain', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
             });
-
-            console.log(data);
-
-            if (data?.message === "✅ تم إرسال البلاغ وحفظ الملف بنجاح." || data?.message?.includes("نجاح") || data?.message?.includes("success")) {
-                formik.resetForm();
-                toast.success(t('feedback.success'), ToastOptions("success"));
-            } else {
-                toast.error(data?.message || t('feedback.error'), ToastOptions("error"));
-            }
-
-            setSendDataLoading(false);
-
+            formik.resetForm();
+            toast.success(t('feedback.success'), ToastOptions("success"));
         } catch (err) {
-            console.error('Error submitting report:', err);
-            const errorMessage = err?.response?.data?.message || 
-                                err?.message || 
-                                t('feedback.error') || 
-                                'Failed to submit report. Please try again.';
-            toast.error(errorMessage, ToastOptions("error"));
+            const message = err?.response?.data?.message;
+            toast.error(
+                (Array.isArray(message) ? message.join('\n') : message) || t('feedback.error'),
+                ToastOptions("error"),
+            );
+        } finally {
             setSendDataLoading(false);
         }
     }
@@ -191,9 +175,9 @@ export default function Feedback() {
                                     }`}
                             >
                                 <option value="">{t('feedback.typePlaceholder')}</option>
-                                <option value="Copyright">{t('feedback.copyright')}</option>
-                                <option value="Trademark">{t('feedback.trademark')}</option>
-                                <option value="Other">{t('feedback.other')}</option>
+                                {complaintTypes.map((type) => (
+                                    <option key={type.id} value={type.id}>{type.name}</option>
+                                ))}
                             </select>
                             {formik.touched.type && formik.errors.type && (
                                 <p className="text-red-500 text-sm flex items-center">

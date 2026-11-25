@@ -1,7 +1,6 @@
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../helpers/ToastOptions';
 import { api } from './apiConfig';
-import { authStorage } from './authStorage';
 
 function getLang() {
     const match = document.cookie.match(/(?:^|;\s*)language=([^;]+)/);
@@ -84,7 +83,13 @@ export const authService = {
 
     signupWithRef: async (username, email, password, confirmPassword, ref, privacyPolicyVersion = null) => {
         try {
-            const payload = { username, email, password, confirmPassword, ref };
+            const payload = {
+                username,
+                email,
+                password,
+                confirmPassword,
+                ...(ref ? { referralCode: ref } : {}),
+            };
             // Only include privacyPolicyVersion if it's a number (not null/undefined)
             if (privacyPolicyVersion !== null && privacyPolicyVersion !== undefined) {
                 payload.privacyPolicyVersion = privacyPolicyVersion;
@@ -178,34 +183,6 @@ export const authService = {
         }
     },
 
-    /**
-     * Exchange a refresh token for a new access token.
-     * Used by the apiConfig 401 interceptor; not normally called directly.
-     */
-    refresh: async () => {
-        const refreshToken = authStorage.getRefreshToken();
-        if (!refreshToken) {
-            const err = new Error('No refresh token available');
-            err.noRefreshToken = true;
-            throw err;
-        }
-        const { data } = await api.post('/auth/refresh', { refreshToken });
-        if (data?.accessToken) authStorage.setAccessToken(data.accessToken);
-        if (data?.refreshToken) authStorage.setRefreshToken(data.refreshToken);
-        return data;
-    },
-
-    /** Server-side logout — invalidates the refresh token. */
-    logout: async () => {
-        try {
-            const refreshToken = authStorage.getRefreshToken();
-            await api.post('/auth/logout', refreshToken ? { refreshToken } : {});
-        } catch (error) {
-            // Best-effort. Local cleanup happens regardless.
-            console.warn('Server logout failed:', error?.response?.data?.message || error?.message);
-        }
-    },
-
     userRole: async (id, token) => {
         try {
             // Use the profile endpoint instead of the non-existent getUserRoleById
@@ -229,26 +206,19 @@ export const authService = {
         }
     },
 
-    getUserAnalytics: async (token) => {
-        try {
-            const { data } = await api.get('/auth/getUserAnalytics', {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            return data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
-    },
-
     /**
      * Google login — new backend endpoint is /auth/google/register (was
-     * /auth/loginWithGmail). Body shape `{ accessToken }` is unchanged.
+     * /auth/loginWithGmail). Accepts `{ accessToken, privacyPolicyVersion? }`.
      */
-    loginWithGmail: async (accessToken) => {
+    loginWithGmail: async (accessToken, privacyPolicyVersion = null) => {
         try {
+            const payload = { accessToken };
+            if (privacyPolicyVersion !== null && privacyPolicyVersion !== undefined) {
+                payload.privacyPolicyVersion = privacyPolicyVersion;
+            }
             const { data } = await api.post(
                 '/auth/google/register',
-                { accessToken },
+                payload,
                 langParams(),
             );
             return data;
@@ -257,17 +227,33 @@ export const authService = {
         }
     },
 
-    getAppLink: async (token) => {
+    logout: async (refreshToken, allDevices = false) => {
+        if (!refreshToken) return null;
+        const payload = allDevices
+            ? { refreshToken, allDevices: true }
+            : { refreshToken };
+        const { data } = await api.post('/auth/logout', payload, langParams());
+        return data;
+    },
+
+    getAppLink: async () => {
         try {
-            const headers = {};
-            if (token) headers.Authorization = `Bearer ${token}`;
-            const { data } = await api.get('/auth/getAppLink', { headers });
-            return data;
+            const { data } = await api.get('/about-us', langParams());
+            const raw = data?.links || {};
+            const list = [
+                raw.playStore ? { platform: 'android', link: raw.playStore, isActive: true } : null,
+                raw.appStore ? { platform: 'ios', link: raw.appStore, isActive: true } : null,
+                raw.web ? { platform: 'web', link: raw.web, isActive: true } : null,
+            ].filter(Boolean);
+            return {
+                ...data,
+                appLinks: raw,
+                links: list,
+            };
         } catch (error) {
             throw error.response?.data || error.message;
         }
     },
-
     // Back-compat aliases for older callers that imported the camelCase name.
     resendotp: async (email) => authService.resendOtp(email),
 };

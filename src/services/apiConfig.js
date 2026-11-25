@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { authStorage } from './authStorage';
 
-export const API_ROOT = 'https://mega-box.onrender.com';
+export const API_ROOT = (import.meta.env.VITE_API_ROOT || 'https://mega-box-production.up.railway.app').replace(/\/+$/, '');
 export const API_URL = `${API_ROOT}/api`;
 
 export const api = axios.create({
@@ -35,7 +35,7 @@ api.interceptors.request.use(
 // ---------------------------------------------------------------------------
 // Refresh-on-401 interceptor.
 //
-// Only the FIRST 401 from a non-/auth/refresh, non-/auth/logout call triggers a
+// Only the FIRST 401 from a non-auth call triggers a
 // refresh attempt. While a refresh is in flight, queued requests await its
 // outcome rather than firing parallel refresh calls.
 //
@@ -60,7 +60,7 @@ async function performRefresh() {
     }
     // Use a bare axios call so this request bypasses the interceptors below
     // (no recursive refresh on its own 401).
-    const { data } = await axios.post(`${API_URL}/auth/refresh`, { refreshToken }, {
+    const { data } = await axios.post(`${API_URL}/auth/token/refresh`, { refreshToken }, {
         headers: { 'Content-Type': 'application/json' },
         timeout: 15000,
     });
@@ -84,7 +84,7 @@ api.interceptors.response.use(
         const url = original?.url || '';
 
         const isAuthEndpoint =
-            url.includes('/auth/refresh') ||
+            url.includes('/auth/token/refresh') ||
             url.includes('/auth/logout') ||
             url.includes('/auth/login');
 

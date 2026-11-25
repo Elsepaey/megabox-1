@@ -1,0 +1,38 @@
+@use "../../../helpers/_variables.scss" as vars;
+
+.admin-catalogs {
+    &__thumb {
+        width: 48px;
+        height: 48px;
+        border-radius: 0.5rem;
+        object-fit: cover;
+        border: 1px solid vars.$gray-200;
+        background: vars.$gray-50;
+        display: block;
+    }
+
+    &__preview-box {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+    }
+
+    &__preview-img {
+        width: 72px;
+        height: 72px;
+        border-radius: 0.75rem;
+        object-fit: cover;
+        border: 1px solid vars.$gray-200;
+        background: vars.$gray-50;
+    }
+
+    &__conflict-box {
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        background: #fef3c7;
+        border: 1px solid #f59e0b;
+        color: #92400e;
+        font-size: vars.$text-sm;
+        line-height: 1.45;
+    }
+}

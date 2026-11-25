@@ -4,9 +4,11 @@ import { useCookies } from 'react-cookie';
 import { useNavigate } from 'react-router-dom';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
-import { FaCheckCircle, FaTimes, FaUser, FaPhone, FaCalendar, FaTag, FaFileInvoice } from 'react-icons/fa';
+import { FaCheckCircle, FaTimes, FaFileInvoice, FaReceipt, FaStickyNote } from 'react-icons/fa';
 import { HiCurrencyDollar, HiClock } from 'react-icons/hi2';
-import { promoterService, userService, adminService } from '../../services/api';
+import { userService } from '../../services/api';
+import { planService } from '../../services/planService';
+import { premiumService } from '../../services/premiumService';
 import { toast } from 'react-toastify';
 import { ToastOptions } from '../../helpers/ToastOptions';
 import { useLanguage } from '../../context/LanguageContext';
@@ -14,6 +16,15 @@ import Loading from '../../components/Loading/Loading';
 import TermsModal from '../../components/TermsModal/TermsModal';
 import Footer from '../../components/Footer/Footer';
 import './Subscription.scss';
+
+const ALLOWED_IMAGE_TYPES = new Set([
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+]);
+const MAX_INVOICE_BYTES = 10 * 1024 * 1024;
 
 export default function Subscription() {
     const { t } = useLanguage();
@@ -24,20 +35,18 @@ export default function Subscription() {
     const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
     const [showTermsModal, setShowTermsModal] = useState(false);
     const [subscriptionForm, setSubscriptionForm] = useState({
+        paymentReference: '',
+        note: '',
         invoiceFile: null,
-        phone: '',
-        subscriberName: '',
-        planName: '',
-        durationDays: ''
     });
     const [isSubmitting, setIsSubmitting] = useState(false);
 
-    // Fetch plans from API using getPlans
+    // Fetch active plans from GET /api/plans
     const { data: plansData, isLoading: plansLoading } = useQuery(
         ['subscription-plans'],
         async () => {
             try {
-                const response = await adminService.getPlans();
+                const response = await planService.getPlans();
                 if (response.plans) return response;
                 if (Array.isArray(response)) return { plans: response };
                 if (response.data) return { plans: response.data };
@@ -46,54 +55,86 @@ export default function Subscription() {
                 return { plans: [] };
             }
         },
-        { enabled: true } // getPlans doesn't require token
+        { enabled: true },
     );
 
-    const plans = plansData?.plans || [];
+    const plans = (plansData?.plans || []).filter((p) => p.type !== 'free');
 
-    // Fetch user data to check subscribed plans
+    // Fetch user account
     const { data: userData } = useQuery(
         ['userAccount'],
         () => userService.getUserInfo(cookies.MegaBox),
         {
             enabled: !!cookies.MegaBox,
-            retry: false
-        }
+            retry: false,
+        },
     );
 
-    // Check if user is promoter
-    const isPromoter = userData?.isPromoter === "true" || userData?.isPromoter === true;
-    
-    // Check if user has subscribed to a plan
-    const hasWatchingPlan = userData?.watchingplan === "true" || userData?.watchingplan === true;
-    const hasDownloadsPlan = userData?.Downloadsplan === "true" || userData?.Downloadsplan === true;
+    const [requestsPage, setRequestsPage] = useState(1);
 
-    // Check premium status and expiration
-    const isPremium = userData?.isBrimume === true || userData?.isBrimume === "true";
-    const premiumExpiration = userData?.premiumExpiration || userData?.premiumExpirationDate || userData?.premiumExpireDate;
-    const userSubscriptionPlan = userData?.subscriptionPlan || userData?.planName || userData?.plan?.name;
-    
-    // Check if premium subscription is still active (not expired)
-    const isPremiumActive = isPremium && premiumExpiration && new Date(premiumExpiration) > new Date();
-    
-    // Check if a plan matches the user's subscription
-    const isPlanSubscribed = (plan) => {
-        if (!isPremiumActive || !userSubscriptionPlan) return false;
-        const planName = plan.name || plan.planName || plan.planKey || '';
-        return planName.toLowerCase() === userSubscriptionPlan.toLowerCase();
+    // Fetch user's own premium requests (paginated)
+    const {
+        data: myRequestsData,
+        isLoading: requestsLoading,
+        isFetching: requestsFetching,
+    } = useQuery(
+        ['my-subscription-requests', requestsPage],
+        () => premiumService.getMyRequests({ page: requestsPage, limit: 10 }),
+        {
+            enabled: !!cookies.MegaBox,
+            keepPreviousData: true,
+            retry: false,
+        },
+    );
+
+    const { data: latestRequestData } = useQuery(
+        ['my-subscription-requests', 'latest'],
+        () => premiumService.getMyRequests({ page: 1, limit: 1 }),
+        {
+            enabled: !!cookies.MegaBox && requestsPage > 1,
+            retry: false,
+        },
+    );
+
+    const myRequests = myRequestsData?.data || [];
+    const requestsMeta = myRequestsData?.meta || null;
+    const requestsTotalPages = requestsMeta?.totalPages || 1;
+    const canPrevRequests = requestsMeta
+        ? Boolean(requestsMeta.hasPrev ?? requestsMeta.hasPrevPage ?? requestsPage > 1)
+        : requestsPage > 1;
+    const canNextRequests = requestsMeta
+        ? Boolean(requestsMeta.hasNext ?? requestsMeta.hasNextPage ?? requestsPage < requestsTotalPages)
+        : requestsPage < requestsTotalPages;
+
+    const hasPendingRequest =
+        myRequests.some((r) => r.status === 'pending') ||
+        (latestRequestData?.data || []).some((r) => r.status === 'pending');
+    const isPremium = userData?.isBrimume === true || userData?.isBrimume === 'true';
+    const premiumExpiration = userData?.brimumeExpiresAt;
+    const isPremiumActive =
+        isPremium && (!premiumExpiration || new Date(premiumExpiration) > new Date());
+
+    const statusLabel = (status) => {
+        if (status === 'approved') return t('accountPremium.statusApproved') || 'Approved';
+        if (status === 'rejected') return t('accountPremium.statusRejected') || 'Rejected';
+        return t('accountPremium.statusPending') || 'Pending';
     };
-    
-    // Check if user has any legacy plans (watchingplan or Downloadsplan)
-    const hasLegacyPlan = hasWatchingPlan || hasDownloadsPlan;
 
-    const handleCreateSubscription = (plan) => {
+    const handleRequestPlan = (plan) => {
         if (!cookies.MegaBox) {
             navigate('/login');
             return;
         }
+        if (hasPendingRequest) {
+            toast.info(
+                t('accountPremium.pendingBanner') ||
+                    'You already have a pending premium request under review.',
+                ToastOptions('info'),
+            );
+            return;
+        }
 
         const termsAccepted = localStorage.getItem('termsAccepted');
-
         if (!termsAccepted) {
             setSelectedPlan(plan);
             setShowTermsModal(true);
@@ -111,97 +152,74 @@ export default function Subscription() {
         }
     };
 
-    // Handle promoter subscribing to a plan for themselves
-    const handleSubscribeToPlan = async (plan) => {
-        if (!cookies.MegaBox) {
-            navigate('/login');
+    const handleFileChange = (e) => {
+        const file = e.target.files?.[0] || null;
+        if (!file) {
+            setSubscriptionForm((prev) => ({ ...prev, invoiceFile: null }));
             return;
         }
-
-        const termsAccepted = localStorage.getItem('termsAccepted');
-
-        if (!termsAccepted) {
-            setSelectedPlan(plan);
-            setShowTermsModal(true);
-            return;
-        }
-
-        // For promoter subscribing to themselves, we need to get their own info
-        if (!userData) {
-            toast.error(t('subscriptionPage.error.userInfo') || "Please wait, loading user information...", ToastOptions("error"));
-            return;
-        }
-
-        setIsSubmitting(true);
-        try {
-            // Create subscription for the promoter themselves
-            await promoterService.createSubscription(
-                null, // No invoice file for self-subscription
-                userData.phone || '',
-                userData.name || userData.username || '',
-                plan.days || 30,
-                plan.name || plan.planName,
-                cookies.MegaBox
+        if (!ALLOWED_IMAGE_TYPES.has(file.type.toLowerCase()) || file.size > MAX_INVOICE_BYTES) {
+            toast.error(
+                t('accountPremium.invalidInvoice') ||
+                    'Invoice must be an image (JPEG, PNG, WebP, or GIF) up to 10 MB',
+                ToastOptions('error'),
             );
-
-            // Invalidate queries to refresh data
-            queryClient.invalidateQueries(['subscription-plans']);
-            queryClient.invalidateQueries(['userAccount']);
-            
-            toast.success(t('subscriptionPage.waitingForApproval') || "Subscription request submitted successfully! Waiting for approval.", ToastOptions("success"));
-        } catch {
-            // Error handled by service
-        } finally {
-            setIsSubmitting(false);
+            e.target.value = '';
+            return;
         }
+        setSubscriptionForm((prev) => ({ ...prev, invoiceFile: file }));
     };
 
     const handleSubscriptionSubmit = async (e) => {
         e.preventDefault();
+        const paymentReference = subscriptionForm.paymentReference.trim();
+        const note = subscriptionForm.note.trim();
 
-        if (!subscriptionForm.phone || !subscriptionForm.subscriberName || !subscriptionForm.invoiceFile || !selectedPlan) {
+        if (!selectedPlan?._id || paymentReference.length < 1 || paymentReference.length > 200) {
+            toast.error(
+                t('accountPremium.paymentReferenceRequired') ||
+                    'Payment reference is required (1–200 characters)',
+                ToastOptions('error'),
+            );
             return;
         }
 
         setIsSubmitting(true);
         try {
-            await promoterService.createSubscription(
-                subscriptionForm.invoiceFile,
-                subscriptionForm.phone,
-                subscriptionForm.subscriberName,
-                selectedPlan.days || 30,
-                selectedPlan.name || selectedPlan.planName,
-                cookies.MegaBox
-            );
+            await premiumService.submitRequest({
+                planId: selectedPlan._id,
+                paymentReference,
+                note: note || undefined,
+                invoiceFile: subscriptionForm.invoiceFile,
+            });
 
             setShowSubscriptionModal(false);
             setSubscriptionForm({
+                paymentReference: '',
+                note: '',
                 invoiceFile: null,
-                phone: '',
-                subscriberName: '',
-                planName: '',
-                durationDays: ''
             });
             setSelectedPlan(null);
-            
-            // Invalidate queries to refresh data
-            queryClient.invalidateQueries(['subscription-plans']);
+            setRequestsPage(1);
+            queryClient.invalidateQueries(['my-subscription-requests']);
             queryClient.invalidateQueries(['userAccount']);
+            toast.success(
+                t('accountPremium.requestSubmitted') ||
+                    'Premium request submitted and is pending review',
+                ToastOptions('success'),
+            );
         } catch (error) {
-            console.error('Error creating subscription:', error);
+            toast.error(
+                error?.message ||
+                    t('accountPremium.requestFailed') ||
+                    'Failed to submit premium request',
+                ToastOptions('error'),
+            );
+            queryClient.invalidateQueries(['my-subscription-requests']);
         } finally {
             setIsSubmitting(false);
         }
     };
-
-    const handleFileChange = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            setSubscriptionForm(prev => ({ ...prev, invoiceFile: file }));
-        }
-    };
-
-
 
     return (
         <>
@@ -218,12 +236,31 @@ export default function Subscription() {
                             {t('subscriptionPage.title') || 'Subscription Plans'}
                         </h1>
                         <p className="subscription-page__subtitle">
-                            {isPromoter 
-                                ? (t('subscriptionPage.subtitle') || 'Choose a subscription plan and create a subscription for your subscribers')
-                                : (t('subscriptionPage.subtitleUser') || 'Browse available subscription plans')
-                            }
+                            {t('subscriptionPage.subtitleUser') || 'Browse available subscription plans'}
                         </p>
                     </motion.div>
+
+                    {isPremiumActive && (
+                        <div className="subscription-page__empty" style={{ marginBottom: '1.5rem' }}>
+                            <p>
+                                <strong>{t('premium.alreadyPremium') || 'You are a Premium member!'}</strong>
+                                {premiumExpiration
+                                    ? ` · ${t('accountPremium.expiresOn') || 'Expires on'}: ${new Date(
+                                          premiumExpiration,
+                                      ).toLocaleDateString()}`
+                                    : ''}
+                            </p>
+                        </div>
+                    )}
+
+                    {hasPendingRequest && (
+                        <div className="subscription-page__empty" style={{ marginBottom: '1.5rem' }}>
+                            <p>
+                                {t('accountPremium.pendingBanner') ||
+                                    'You already have a pending premium request under review.'}
+                            </p>
+                        </div>
+                    )}
 
                     {/* Plans Section */}
                     <div className="subscription-page__section">
@@ -246,12 +283,14 @@ export default function Subscription() {
                                     >
                                         <div className="subscription-page__plan-header">
                                             <h3 className="subscription-page__plan-title">
-                                                {plan.name || t('subscriptionPage.plan.defaultName') || 'Subscription Plan'}
+                                                {plan.name ||
+                                                    t('subscriptionPage.plan.defaultName') ||
+                                                    'Subscription Plan'}
                                             </h3>
                                             <div className="subscription-page__plan-price">
                                                 <HiCurrencyDollar className="subscription-page__plan-price-icon" />
                                                 <span className="subscription-page__plan-amount">
-                                                    {plan.price || '0'}
+                                                    {plan.price ?? 0}
                                                 </span>
                                                 <span className="subscription-page__plan-currency">
                                                     {plan.currency || 'USD'}
@@ -267,68 +306,36 @@ export default function Subscription() {
                                                         {plan.days || 30} {t('subscriptionPage.plan.days') || 'days'}
                                                     </span>
                                                 </li>
-                                                {plan.description && (
-                                                    <li className="subscription-page__plan-feature">
+                                                {(plan.features || []).map((feat, i) => (
+                                                    <li key={i} className="subscription-page__plan-feature">
                                                         <FaCheckCircle className="subscription-page__plan-feature-icon" />
-                                                        <span>{plan.description}</span>
+                                                        <span>{feat}</span>
                                                     </li>
-                                                )}
+                                                ))}
                                             </ul>
-                                        {isPromoter ? (
-                                            <div className="subscription-page__plan-actions">
-                                                {isPlanSubscribed(plan) ? (
-                                                    <button
-                                                        disabled
-                                                        className="subscription-page__plan-button subscription-page__plan-button--subscribed"
-                                                    >
-                                                        {t('subscriptionPage.subscribed') || 'Subscribed'}
-                                                    </button>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => handleSubscribeToPlan(plan)}
-                                                        className="subscription-page__plan-button subscription-page__plan-button--subscribe"
-                                                        disabled={isSubmitting}
-                                                    >
-                                                        {t('subscriptionPage.subscribe') || 'Subscribe'}
-                                                    </button>
-                                                )}
-                                                <button
-                                                    onClick={() => handleCreateSubscription(plan)}
-                                                    className="subscription-page__plan-button subscription-page__plan-button--create"
-                                                >
-                                                    {t('subscriptionPage.createSubscription') || 'Create Subscription'}
-                                                </button>
-                                            </div>
-                                        ) : (
-                                            isPlanSubscribed(plan) ? (
-                                                <button
-                                                    disabled
-                                                    className="subscription-page__plan-button subscription-page__plan-button--subscribed"
-                                                >
-                                                    {t('subscriptionPage.subscribed') || 'Subscribed'}
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => navigate('/Subscribe')}
-                                                    className="subscription-page__plan-button"
-                                                >
-                                                    {t('subscriptionPage.subscribe') || 'Subscribe'}
-                                                </button>
-                                            )
-                                        )}
+                                            <button
+                                                onClick={() => handleRequestPlan(plan)}
+                                                className="subscription-page__plan-button"
+                                                disabled={isSubmitting || hasPendingRequest}
+                                            >
+                                                {t('subscriptionPage.subscribe') || 'Subscribe'}
+                                            </button>
                                         </div>
                                     </motion.div>
                                 ))}
                             </div>
                         ) : (
                             <div className="subscription-page__empty">
-                                <p>{t('subscriptionPage.noPlans') || 'No subscription plans available at the moment.'}</p>
+                                <p>
+                                    {t('subscriptionPage.noPlans') ||
+                                        'No subscription plans available at the moment.'}
+                                </p>
                             </div>
                         )}
                     </div>
 
-                    {/* User's Subscribed Plans Section */}
-                    {cookies.MegaBox && hasLegacyPlan && (
+                    {/* User's Premium Requests Section */}
+                    {cookies.MegaBox && (
                         <motion.div
                             initial={{ opacity: 0, y: 30 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -336,27 +343,105 @@ export default function Subscription() {
                             className="subscription-page__section subscription-page__subscribed-plans"
                         >
                             <h2 className="subscription-page__section-title">
-                                {t('subscriptionPage.mySubscribedPlans') || 'My Subscribed Plans'}
+                                {t('accountPremium.myRequestsTitle') || 'My Premium Requests'}
                             </h2>
-                            
-                            {/* Legacy Plans Info */}
-                            <div className="subscription-page__legacy-plans">
-                                {hasWatchingPlan && (
-                                    <div className="subscription-page__legacy-plan-item">
-                                        <FaCheckCircle className="subscription-page__legacy-plan-icon" />
-                                        <span>{t('subscriptionPage.watchingPlan') || 'Watching Plan'} - {t('subscriptionPage.active') || 'Active'}</span>
-                                    </div>
-                                )}
-                                {hasDownloadsPlan && (
-                                    <div className="subscription-page__legacy-plan-item">
-                                        <FaCheckCircle className="subscription-page__legacy-plan-icon" />
-                                        <span>{t('subscriptionPage.downloadsPlan') || 'Downloads Plan'} - {t('subscriptionPage.active') || 'Active'}</span>
-                                    </div>
-                                )}
-                            </div>
+                            {requestsLoading ? (
+                                <div className="subscription-page__loading">
+                                    <Loading />
+                                </div>
+                            ) : myRequests.length === 0 ? (
+                                <div className="subscription-page__empty">
+                                    <p>
+                                        {t('accountPremium.noRequests') ||
+                                            'You have not submitted any premium requests yet.'}
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="subscription-page__plans">
+                                    {myRequests.map((req) => (
+                                        <div key={req._id} className="subscription-page__plan-card">
+                                            <div className="subscription-page__plan-header">
+                                                <h3 className="subscription-page__plan-title">
+                                                    {req.plan?.name || req.planId}
+                                                </h3>
+                                                <span style={{ fontWeight: 600 }}>
+                                                    {statusLabel(req.status)}
+                                                </span>
+                                            </div>
+                                            <div className="subscription-page__plan-content">
+                                                <p>
+                                                    <strong>{t('accountPremium.paymentReference')}:</strong>{' '}
+                                                    {req.paymentReference}
+                                                </p>
+                                                {req.note && (
+                                                    <p>
+                                                        <strong>{t('accountPremium.note')}:</strong> {req.note}
+                                                    </p>
+                                                )}
+                                                <p>
+                                                    <strong>{t('accountPremium.submittedOn')}:</strong>{' '}
+                                                    {new Date(req.createdAt).toLocaleString()}
+                                                </p>
+                                                {req.reviewReason && (
+                                                    <p>
+                                                        <strong>{t('accountPremium.reviewReason')}:</strong>{' '}
+                                                        {req.reviewReason}
+                                                    </p>
+                                                )}
+                                                {req.invoiceUrl && (
+                                                    <a
+                                                        href={req.invoiceUrl}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                    >
+                                                        {t('accountPremium.viewInvoice') || 'View Receipt'}
+                                                    </a>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            {requestsMeta && requestsTotalPages > 1 && (
+                                <div
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '1rem',
+                                        marginTop: '1.5rem',
+                                    }}
+                                >
+                                    <button
+                                        type="button"
+                                        className="subscription-page__plan-button"
+                                        style={{ width: 'auto', padding: '0.5rem 1rem' }}
+                                        disabled={!canPrevRequests || requestsFetching}
+                                        onClick={() => setRequestsPage((p) => Math.max(1, p - 1))}
+                                    >
+                                        {t('accountPremium.previous') || 'Previous'}
+                                    </button>
+                                    <span>
+                                        {t('accountPremium.pageOf', {
+                                            page: requestsMeta.page || requestsPage,
+                                            totalPages: requestsTotalPages,
+                                        }) || `Page ${requestsMeta.page || requestsPage} of ${requestsTotalPages}`}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        className="subscription-page__plan-button"
+                                        style={{ width: 'auto', padding: '0.5rem 1rem' }}
+                                        disabled={!canNextRequests || requestsFetching}
+                                        onClick={() =>
+                                            setRequestsPage((p) => Math.min(requestsTotalPages, p + 1))
+                                        }
+                                    >
+                                        {t('accountPremium.next') || 'Next'}
+                                    </button>
+                                </div>
+                            )}
                         </motion.div>
                     )}
-
                 </div>
             </div>
 
@@ -370,7 +455,7 @@ export default function Subscription() {
                 onAccept={handleTermsAccept}
             />
 
-            {/* Subscription Modal */}
+            {/* Subscription Request Modal */}
             <AnimatePresence>
                 {showSubscriptionModal && selectedPlan && (
                     <motion.div
@@ -395,52 +480,70 @@ export default function Subscription() {
                                 <FaTimes />
                             </button>
                             <h3 className="subscription-page__modal-title">
-                                {t('subscriptionPage.modal.title') || 'Create Subscription'}
+                                {t('subscribe.modal.title') || 'Subscribe to Plan'}
                             </h3>
                             <p className="subscription-page__modal-subtitle">
-                                {t('subscriptionPage.modal.selectedPlan') || 'Selected Plan'}: <strong>{selectedPlan.name || selectedPlan.title}</strong>
+                                {t('subscriptionPage.modal.selectedPlan') || 'Selected Plan'}:{' '}
+                                <strong>{selectedPlan.name}</strong> (${selectedPlan.price})
                             </p>
                             <form onSubmit={handleSubscriptionSubmit} className="subscription-page__modal-form">
                                 <div className="subscription-page__form-group">
                                     <label>
-                                        <FaUser className="subscription-page__form-icon" />
-                                        {t('subscriptionPage.modal.subscriberName') || 'Subscriber Name'}
+                                        <FaReceipt className="subscription-page__form-icon" />
+                                        {t('accountPremium.paymentReference') || 'Payment Reference'} *
                                     </label>
                                     <input
                                         type="text"
-                                        value={subscriptionForm.subscriberName}
-                                        onChange={(e) => setSubscriptionForm(prev => ({ ...prev, subscriberName: e.target.value }))}
+                                        maxLength={200}
+                                        value={subscriptionForm.paymentReference}
+                                        onChange={(e) =>
+                                            setSubscriptionForm((prev) => ({
+                                                ...prev,
+                                                paymentReference: e.target.value,
+                                            }))
+                                        }
                                         required
                                         disabled={isSubmitting}
-                                        placeholder={t('subscriptionPage.modal.subscriberNamePlaceholder') || 'Enter subscriber name'}
+                                        placeholder={
+                                            t('accountPremium.paymentReferencePlaceholder') ||
+                                            'Transaction ID, transfer code, or receipt number'
+                                        }
                                     />
                                 </div>
                                 <div className="subscription-page__form-group">
                                     <label>
-                                        <FaPhone className="subscription-page__form-icon" />
-                                        {t('subscriptionPage.modal.phone') || 'Phone Number'}
+                                        <FaStickyNote className="subscription-page__form-icon" />
+                                        {t('accountPremium.note') || 'Note (optional)'}
                                     </label>
-                                    <input
-                                        type="tel"
-                                        value={subscriptionForm.phone}
-                                        onChange={(e) => setSubscriptionForm(prev => ({ ...prev, phone: e.target.value }))}
-                                        required
+                                    <textarea
+                                        rows={3}
+                                        maxLength={500}
+                                        value={subscriptionForm.note}
+                                        onChange={(e) =>
+                                            setSubscriptionForm((prev) => ({
+                                                ...prev,
+                                                note: e.target.value,
+                                            }))
+                                        }
                                         disabled={isSubmitting}
-                                        placeholder={t('subscriptionPage.modal.phonePlaceholder') || 'Enter phone number'}
+                                        placeholder={
+                                            t('accountPremium.notePlaceholder') ||
+                                            'Additional payment details or transfer method (optional)'
+                                        }
                                     />
                                 </div>
                                 <div className="subscription-page__form-group">
                                     <label>
                                         <FaFileInvoice className="subscription-page__form-icon" />
-                                        {t('subscriptionPage.modal.invoice') || 'Invoice'} *
+                                        {t('accountPremium.invoiceImage') || 'Payment Receipt Image (optional)'}
                                     </label>
                                     <input
                                         type="file"
-                                        accept="image/*,.pdf"
+                                        accept="image/jpeg,image/png,image/webp,image/gif"
                                         onChange={handleFileChange}
-                                        required
                                         disabled={isSubmitting}
                                     />
+                                    <small>{t('accountPremium.invoiceHint')}</small>
                                     {subscriptionForm.invoiceFile && (
                                         <span className="subscription-page__file-name">
                                             {subscriptionForm.invoiceFile.name}
@@ -452,10 +555,9 @@ export default function Subscription() {
                                     className="subscription-page__modal-submit"
                                     disabled={isSubmitting}
                                 >
-                                    {isSubmitting 
-                                        ? (t('subscriptionPage.modal.submitting') || 'Submitting...') 
-                                        : (t('subscriptionPage.modal.submit') || 'Submit Subscription')
-                                    }
+                                    {isSubmitting
+                                        ? t('accountPremium.submitting') || 'Submitting...'
+                                        : t('accountPremium.submitRequest') || 'Submit Premium Request'}
                                 </button>
                             </form>
                         </motion.div>

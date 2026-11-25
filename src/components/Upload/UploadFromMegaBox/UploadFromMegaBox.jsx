@@ -1,273 +1,265 @@
-import React, { useState } from 'react';
-import { HiX } from "react-icons/hi";
-import { HiCheckCircle, HiTrash, HiArrowPath } from "react-icons/hi2";
+import React, { useState, useMemo } from 'react';
 // eslint-disable-next-line no-unused-vars
 import { motion } from 'framer-motion';
-import { PreventFunction } from '../../../helpers/Prevent';
-import { useLanguage } from '../../../context/LanguageContext';
+import { HiX } from 'react-icons/hi';
+import { HiCloud } from 'react-icons/hi2';
+import { LuFile, LuSearch, LuCopy } from 'react-icons/lu';
 import { useCookies } from 'react-cookie';
-import { useQuery } from 'react-query';
-import { fileService } from '../../../services/api';
-import { getAllUnifiedItems } from '../../../services/itemsService';
+import { useQuery, useQueryClient } from 'react-query';
 import { toast } from 'react-toastify';
+import { PreventFunction } from '../../../helpers/Prevent';
 import { ToastOptions } from '../../../helpers/ToastOptions';
-import axios from 'axios';
-import { API_URL } from '../../../services/api';
+import { useLanguage } from '../../../context/LanguageContext';
+import { fileService } from '../../../services/fileService';
+import { getAllUnifiedItems } from '../../../services/itemsService';
 import './UploadFromMegaBox.scss';
 
-export default function UploadFromMegaBox({ ToggleUploadFile, refetch, insideFile, id }) {
+const MAX_COPY_FILES = 50;
+
+function formatBytes(bytes) {
+    if (!bytes || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let val = bytes;
+    let idx = 0;
+    while (val >= 1024 && idx < units.length - 1) {
+        val /= 1024;
+        idx += 1;
+    }
+    return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+export default function UploadFromMegaBox({
+    onClose,
+    ToggleUploadFile,
+    insideFile = false,
+    id,
+    targetFolderId,
+    channelId,
+    refetch,
+    onSuccess,
+}) {
+    const closeHandler = onClose || ToggleUploadFile;
     const { t } = useLanguage();
-    const [Token] = useCookies(['MegaBox']);
-    const [selectedFiles, setSelectedFiles] = useState([]);
-    const [, setUploadProgress] = useState({});
-    const [UploadLoading, setUploadLoading] = useState(false);
+    const [cookies] = useCookies(['MegaBox']);
+    const queryClient = useQueryClient();
 
-    // Get all files from MegaBox
-    const GetFiles = async () => {
-        if (!Token.MegaBox) return { files: [] };
-        try {
-            const items = await getAllUnifiedItems(Token.MegaBox);
-            // Filter to get only files (exclude folders)
-            const files = items.filter(item => !item.isFolder && item.itemType !== 'folder');
-            return { files };
-        } catch {
-            return { files: [] };
-        }
-    };
+    const [search, setSearch] = useState('');
+    const [selectedIds, setSelectedIds] = useState([]);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const { data: filesData, isLoading } = useQuery(
-        ['userFilesForUpload'],
-        GetFiles,
+    const { data: allItems = [], isLoading } = useQuery(
+        ['copyFromMegaBoxFiles'],
+        () => getAllUnifiedItems(cookies.MegaBox),
         {
-            enabled: !!Token.MegaBox,
-            retry: false
+            enabled: Boolean(cookies.MegaBox),
+            staleTime: 30000,
         }
     );
 
-    const getFileTypeIcon = (fileType) => {
-        if (fileType?.startsWith('image/')) return '🖼️';
-        if (fileType?.startsWith('video/')) return '🎥';
-        if (fileType === 'application/pdf') return '📄';
-        if (fileType?.includes('zip') || fileType?.includes('rar') || fileType?.includes('7z')) return '📦';
-        return '📎';
-    };
-
-    const formatFileSize = (bytes) => {
-        if (!bytes || bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-    };
-
-    const toggleFileSelection = (file) => {
-        setSelectedFiles(prev => {
-            const exists = prev.some(f => (f._id || f.id) === (file._id || file.id));
-            if (exists) {
-                return prev.filter(f => (f._id || f.id) !== (file._id || file.id));
-            } else {
-                return [...prev, file];
+    const completedFiles = useMemo(() => {
+        return allItems.filter((item) => {
+            const isFolder = item.isFolder || item.itemType === 'folder';
+            if (isFolder) return false;
+            if (item.upload_status && item.upload_status !== 'completed') return false;
+            if (channelId && !(item.isVideo || (item.fileType || '').startsWith('video/'))) {
+                return false;
             }
+            return Boolean(item._id || item.id);
+        });
+    }, [allItems, channelId]);
+
+    const filteredFiles = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        if (!q) return completedFiles;
+        return completedFiles.filter((file) =>
+            (file.fileName || file.name || '').toLowerCase().includes(q)
+        );
+    }, [completedFiles, search]);
+
+    const toggleFile = (fileId) => {
+        setSelectedIds((prev) => {
+            if (prev.includes(fileId)) {
+                return prev.filter((item) => item !== fileId);
+            }
+            if (prev.length >= MAX_COPY_FILES) {
+                toast.warning(
+                    t('filesV2.copyMaxFilesWarning') || `You can copy up to ${MAX_COPY_FILES} files at once`,
+                    ToastOptions('warning')
+                );
+                return prev;
+            }
+            return [...prev, fileId];
         });
     };
 
-    const ClearAllFiles = () => {
-        setSelectedFiles([]);
-        setUploadProgress({});
-    };
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (selectedIds.length === 0 || isSubmitting) return;
 
-    const AddFiles = async () => {
-        if (selectedFiles.length === 0) {
-            toast.error(t("uploadFromMegaBox.selectFiles"), ToastOptions("error"));
-            return;
-        }
-
-        setUploadLoading(true);
-        let successCount = 0;
-        let failCount = 0;
-
-        // Upload files sequentially
-        for (let i = 0; i < selectedFiles.length; i++) {
-            const file = selectedFiles[i];
-            
-            try {
-                setUploadProgress(prev => ({ ...prev, [i]: 'uploading' }));
-
-                // Copy file by creating a new file entry with the same URL
-                let data;
-                if (insideFile) {
-                    // Upload file to folder - Note: This endpoint might need file object, check API
-                    // For now, using axios as the endpoint might expect different format
-                    const response = await axios.post(
-                        `${API_URL}/user/createFile/${id}`,
-                        {
-                            fileName: file.fileName || file.name,
-                            fileType: file.fileType,
-                            url: file.url || file.fileUrl,
-                            size: file.size
-                        },
-                        {
-                            headers: {
-                                Authorization: `Bearer ${Token.MegaBox}`,
-                                'Content-Type': 'application/json'
-                            }
-                        }
-                    );
-                    data = response.data;
-                } else {
-                    // Upload file to root - Note: This endpoint might need file object, check API
-                    const response = await axios.post(
-                        `${API_URL}/auth/createFile`,
-                        {
-                            fileName: file.fileName || file.name,
-                            fileType: file.fileType,
-                            url: file.url || file.fileUrl,
-                            size: file.size
-                        },
-                        {
-                            headers: {
-                                Authorization: `Bearer ${Token.MegaBox}`,
-                                'Content-Type': 'application/json'
-                            }
-                        }
-                    );
-                    data = response.data;
-                }
-
-                if (data?.message === "✅ تم رفع الملف بنجاح" || data?.success) {
-                    setUploadProgress(prev => ({ ...prev, [i]: 'success' }));
-                    successCount++;
-                } else {
-                    setUploadProgress(prev => ({ ...prev, [i]: 'error' }));
-                    failCount++;
-                }
-            } catch {
-                setUploadProgress(prev => ({ ...prev, [i]: 'error' }));
-                failCount++;
+        setIsSubmitting(true);
+        try {
+            const resolvedTargetFolderId = targetFolderId ?? (insideFile ? id : undefined);
+            const result = await fileService.copyFiles(
+                {
+                    fileIds: selectedIds,
+                    targetFolderId: resolvedTargetFolderId || undefined,
+                    channelId: channelId || undefined,
+                },
+                cookies.MegaBox
+            );
+            const count = result?.copiedCount ?? selectedIds.length;
+            toast.success(
+                result?.message ||
+                    (t('filesV2.copyFilesSuccess') || `${count} file(s) copied successfully`),
+                ToastOptions('success')
+            );
+            queryClient.invalidateQueries(['items']);
+            queryClient.invalidateQueries(['userStorage']);
+            if (channelId) {
+                queryClient.invalidateQueries(['channelFiles', channelId]);
             }
-        }
-
-        setUploadLoading(false);
-
-        // Show results
-        if (successCount > 0 && failCount === 0) {
-            toast.success(`${successCount} ${successCount === 1 ? t("uploadFromMegaBox.file") : t("uploadFromMegaBox.files")} ${t("uploadFromMegaBox.uploaded")}`, ToastOptions("success"));
-            await refetch();
-            setTimeout(() => {
-                ToggleUploadFile();
-            }, 1000);
-        } else if (successCount > 0 && failCount > 0) {
-            toast.warning(`${successCount} ${successCount === 1 ? t("uploadFromMegaBox.file") : t("uploadFromMegaBox.files")} ${t("uploadFromMegaBox.uploaded")}, ${failCount} ${t("uploadFromMegaBox.failed")}`, ToastOptions("warning"));
-            await refetch();
-        } else {
-            toast.error(t("uploadFromMegaBox.allFailed"), ToastOptions("error"));
+            if (refetch) await refetch();
+            if (onSuccess) onSuccess(result);
+            if (closeHandler) closeHandler();
+        } catch (error) {
+            const msg = error?.message || t('filesV2.copyFilesFailed') || 'Failed to copy files';
+            toast.error(msg, ToastOptions('error'));
+        } finally {
+            setIsSubmitting(false);
         }
     };
-
-    const files = filesData?.files || [];
 
     return (
-        <motion.div 
-            className='UploadFromMegaBox_backdrop' 
-            onClick={ToggleUploadFile} 
+        <motion.div
+            className="UploadFromMegaBox_backdrop"
+            onClick={closeHandler}
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }} 
-            transition={{ duration: 0.3, ease: 'linear' }} 
+            animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
         >
-            <motion.div 
+            <motion.div
                 className="UploadFromMegaBox_modal"
-                onClick={PreventFunction} 
+                onClick={PreventFunction}
                 initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }} 
-                exit={{ y: 20, opacity: 0 }} 
-                transition={{ duration: 0.4, type: 'spring' }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 20, opacity: 0 }}
+                transition={{ duration: 0.25 }}
             >
-                <HiX 
-                    className='UploadFromMegaBox_close' 
-                    onClick={ToggleUploadFile}
-                />
-
                 <div className="UploadFromMegaBox_header">
-                    <h2 className="UploadFromMegaBox_title">{t("uploadFromMegaBox.title")}</h2>
-                    <p className="UploadFromMegaBox_subtitle">{t("uploadFromMegaBox.subtitle")}</p>
+                    <div className="UploadFromMegaBox_title_wrap">
+                        <div className="UploadFromMegaBox_icon">
+                            <HiCloud className="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h2 className="UploadFromMegaBox_title">
+                                {t('filesV2.copyFromMegaBoxTitle') || 'Copy from MegaBox'}
+                            </h2>
+                            <p className="UploadFromMegaBox_subtitle">
+                                {t('filesV2.copyFromMegaBoxSubtitle') || 'Select files from your MegaBox drive to copy here'}
+                            </p>
+                        </div>
+                    </div>
+                    <button
+                        type="button"
+                        className="UploadFromMegaBox_close"
+                        onClick={closeHandler}
+                        aria-label={t('common.close') || 'Close'}
+                    >
+                        <HiX className="w-5 h-5" />
+                    </button>
                 </div>
 
-                {isLoading ? (
-                    <div className="UploadFromMegaBox_loading">
-                        <HiArrowPath className="animate-spin" />
-                        <p>{t("files.loadingFiles")}</p>
-                    </div>
-                ) : files.length === 0 ? (
-                    <div className="UploadFromMegaBox_empty">
-                        <p className="UploadFromMegaBox_empty_title">{t("uploadFromMegaBox.noFiles")}</p>
-                        <p className="UploadFromMegaBox_empty_desc">{t("uploadFromMegaBox.noFilesDesc")}</p>
-                    </div>
-                ) : (
-                    <>
-                        <div className="UploadFromMegaBox_files">
-                            {files.map((file) => {
-                                const fileId = file._id || file.id;
-                                const isSelected = selectedFiles.some(f => (f._id || f.id) === fileId);
-                                
-                                return (
-                                    <div
-                                        key={fileId}
-                                        className={`UploadFromMegaBox_file ${isSelected ? 'selected' : ''}`}
-                                        onClick={() => toggleFileSelection(file)}
-                                    >
-                                        <div className="UploadFromMegaBox_file_icon">
-                                            {getFileTypeIcon(file.fileType)}
-                                        </div>
-                                        <div className="UploadFromMegaBox_file_info">
-                                            <p className="UploadFromMegaBox_file_name">{file.fileName || file.name}</p>
-                                            <p className="UploadFromMegaBox_file_size">{formatFileSize(file.size)}</p>
-                                        </div>
-                                        {isSelected && (
-                                            <HiCheckCircle className="UploadFromMegaBox_file_check" />
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                        {selectedFiles.length > 0 && (
-                            <div className="UploadFromMegaBox_selected">
-                                <div className="UploadFromMegaBox_selected_header">
-                                    <p className="UploadFromMegaBox_selected_title">
-                                        {t("uploadFromMegaBox.selectedFiles")} ({selectedFiles.length})
-                                    </p>
-                                    <button
-                                        onClick={ClearAllFiles}
-                                        className="UploadFromMegaBox_clear"
-                                    >
-                                        {t("uploadFromMegaBox.clearAll")}
-                                    </button>
-                                </div>
+                <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0">
+                    <div className="UploadFromMegaBox_body">
+                        <div className="UploadFromMegaBox_toolbar">
+                            <div className="UploadFromMegaBox_search_wrap">
+                                <LuSearch className="UploadFromMegaBox_search_icon w-4 h-4" />
+                                <input
+                                    type="text"
+                                    className="UploadFromMegaBox_search_input"
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder={t('filesV2.searchFilesPlaceholder') || 'Search your files...'}
+                                />
                             </div>
-                        )}
-
-                        <div className="UploadFromMegaBox_actions">
-                            <button
-                                type="button"
-                                onClick={AddFiles}
-                                disabled={selectedFiles.length === 0 || UploadLoading}
-                                className="UploadFromMegaBox_upload_btn"
-                            >
-                                {UploadLoading ? (
-                                    <>
-                                        <HiArrowPath className='LoadingButton' />
-                                        {t("uploadFromMegaBox.uploading")}
-                                    </>
-                                ) : (
-                                    `${t("uploadFromMegaBox.upload")} ${selectedFiles.length > 0 ? selectedFiles.length : ''} ${selectedFiles.length === 1 ? t("uploadFromMegaBox.file") : t("uploadFromMegaBox.files")}`
-                                )}
-                            </button>
+                            <span className="UploadFromMegaBox_count">
+                                {selectedIds.length} / {MAX_COPY_FILES} {t('filesV2.selected') || 'selected'}
+                            </span>
                         </div>
-                    </>
-                )}
+
+                        <div className="UploadFromMegaBox_list">
+                            {isLoading ? (
+                                <div className="UploadFromMegaBox_empty">
+                                    {t('common.loading') || 'Loading...'}
+                                </div>
+                            ) : filteredFiles.length === 0 ? (
+                                <div className="UploadFromMegaBox_empty">
+                                    {t('filesV2.noFilesToCopy') || 'No completed files found in your drive'}
+                                </div>
+                            ) : (
+                                filteredFiles.map((file) => {
+                                    const fileId = String(file._id || file.id);
+                                    const checked = selectedIds.includes(fileId);
+                                    return (
+                                        <label
+                                            key={fileId}
+                                            className={`UploadFromMegaBox_item ${checked ? 'selected' : ''}`}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() => toggleFile(fileId)}
+                                                disabled={isSubmitting}
+                                            />
+                                            <span className="UploadFromMegaBox_item_icon">
+                                                <LuFile className="w-4 h-4" />
+                                            </span>
+                                            <div className="UploadFromMegaBox_item_info">
+                                                <div className="UploadFromMegaBox_item_name">
+                                                    {file.fileName || file.name}
+                                                </div>
+                                                <div className="UploadFromMegaBox_item_meta">
+                                                    {formatBytes(file.fileSize || file.size)}
+                                                </div>
+                                            </div>
+                                        </label>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="UploadFromMegaBox_footer">
+                        <button
+                            type="button"
+                            className="UploadFromMegaBox_btn_cancel"
+                            onClick={closeHandler}
+                            disabled={isSubmitting}
+                        >
+                            {t('common.cancel') || 'Cancel'}
+                        </button>
+                        <button
+                            type="submit"
+                            className="UploadFromMegaBox_btn_submit"
+                            disabled={selectedIds.length === 0 || isSubmitting}
+                        >
+                            {isSubmitting ? (
+                                <>
+                                    <span className="inline-block w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                    {t('filesV2.copyingFiles') || 'Copying...'}
+                                </>
+                            ) : (
+                                <>
+                                    <LuCopy className="w-4 h-4" />
+                                    {t('filesV2.copyFilesButton') || 'Copy Selected'}
+                                    {selectedIds.length > 0 ? ` (${selectedIds.length})` : ''}
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </form>
             </motion.div>
         </motion.div>
     );
 }
-

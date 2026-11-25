@@ -2,37 +2,43 @@ import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useCookies } from 'react-cookie';
 import Loading from '../components/Loading/Loading';
-import { userService } from '../services/api';
+import { api } from '../services/apiConfig';
 
 export default function PromoterWithPlanProtector({ children }) {
     const [cookies] = useCookies(['MegaBox']);
-    const [hasAccess, setHasAccess] = useState(null);
+    const [hasAccess, setHasAccess] = useState(false);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        let cancelled = false;
+
         const checkAccess = async () => {
             const token = cookies.MegaBox;
             if (!token) {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
                 return;
             }
 
             try {
-                const userData = await userService.getUserInfo(token);
-                const isPromoter = userData?.isPromoter === "true" || userData?.isPromoter === true;
-                const hasDownloadsPlan = userData?.Downloadsplan === "true" || userData?.Downloadsplan === true;
-                const hasWatchingPlan = userData?.watchingplan === "true" || userData?.watchingplan === true;
-
-                setHasAccess(isPromoter && (hasDownloadsPlan || hasWatchingPlan));
-                setLoading(false);
+                const response = await api.get('/users/profile');
+                const userData = response.data?.data;
+                const isPromoter = userData?.isPromoter === true;
+                const hasPlan = Boolean(userData?.promoterPlan);
+                if (!cancelled) {
+                    setHasAccess(isPromoter && hasPlan);
+                    setLoading(false);
+                }
             } catch (error) {
                 console.error('Error checking promoter with plan status:', error);
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
 
         checkAccess();
-    }, [cookies]);
+        return () => {
+            cancelled = true;
+        };
+    }, [cookies.MegaBox]);
 
     if (loading) {
         return <Loading />;

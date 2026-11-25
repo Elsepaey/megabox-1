@@ -1,145 +1,67 @@
-import { toast } from 'react-toastify';
-import { ToastOptions } from '../helpers/ToastOptions';
 import { api } from './apiConfig';
 
 export const promoterService = {
-    // Get user earnings
-    getUserEarnings: async (token) => {
-        try {
-            const response = await api.get('/auth/getUserEarnings', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+    // GET /api/earnings
+    getEarnings: async () => {
+        const response = await api.get('/earnings');
+        return response.data;
     },
 
-    // Get share link analytics
-    getShareLinkAnalytics: async (token) => {
-        try {
-            const response = await api.get('/auth/getShareLinkAnalytics', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+    // GET /api/earnings/breakdown
+    getEarningsBreakdown: async ({ page = 1, limit = 20 } = {}) => {
+        const response = await api.get('/earnings/breakdown', {
+            params: { page, limit },
+        });
+        return response.data;
     },
 
-    // Get all promoters
-    getAllPromoters: async (token) => {
-        try {
-            const response = await api.get('/auth/getAllPromoters', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+    // GET /api/promoter/stats
+    getPromoterStats: async ({ from, to } = {}) => {
+        const params = {};
+        if (from) params.from = from;
+        if (to) params.to = to;
+        const response = await api.get('/promoter/stats', { params });
+        return response.data;
     },
 
-    // Get all subscription plans (for promoters)
-    getPlans: async () => {
-        try {
-            const response = await api.get('/auth/getPlans');
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+    // GET /api/promoter/shares
+    getPromoterShares: async ({ page = 1, limit = 20 } = {}) => {
+        const response = await api.get('/promoter/shares', {
+            params: { page, limit },
+        });
+        return response.data;
     },
 
-    // Create subscription (for promoters)
-    createSubscription: async (invoiceFile, phone, subscriberName, durationDays, planName, token, paymentMethod = null) => {
-        try {
-            // Validate required fields
-            if (!phone || !phone.trim()) {
-                throw new Error('Phone number is required');
-            }
-            if (!planName || !planName.trim()) {
-                throw new Error('Plan name is required');
-            }
-            if (!durationDays || isNaN(durationDays)) {
-                throw new Error('Duration days is required and must be a number');
-            }
-            if (!invoiceFile) {
-                throw new Error('Invoice file is required');
-            }
-
-            const formData = new FormData();
-            formData.append('invoice', invoiceFile);
-            formData.append('phone', phone.trim());
-            formData.append('subscriberName', subscriberName && subscriberName.trim() ? subscriberName.trim() : '');
-            formData.append('durationDays', String(durationDays));
-            formData.append('planName', planName.trim());
-            
-            // Add payment method if provided
-            if (paymentMethod && paymentMethod.trim()) {
-                formData.append('paymentMethod', paymentMethod.trim());
-            }
-
-
-            const response = await api.post('/auth/createSubscription', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            toast.success("Subscription created successfully!", ToastOptions("success"));
-            return response.data;
-        } catch (error) {
-            const errorMessage = error.response?.data?.message || error.message || "Failed to create subscription";
-            toast.error(errorMessage, ToastOptions("error"));
-            throw error.response?.data || error;
-        }
+    // GET /api/promoter/privacy-policy
+    getPromoterPrivacyPolicy: async (lang = 'en') => {
+        const response = await api.get('/promoter/privacy-policy', {
+            params: { lang },
+        });
+        return response.data;
     },
 
-    // Get user withdrawals (for promoters) - GET method
-    // Changed from POST to GET as this is a read operation
-    getUserWithdrawals: async (token) => {
-        try {
-            const response = await api.get('/auth/getUserWithdrawals', {
-                headers: {
-                    Authorization: `Bearer ${token}`
-                }
-            });
-            
-            // Log to verify if reason field is included in backend response
-            // TODO: Remove this console.log after confirming backend response structure
-            const withdrawals = response.data?.withdrawals || response.data?.data || response.data || [];
-            const rejectedWithdrawals = Array.isArray(withdrawals) ? withdrawals.filter(w => w.status === 'rejected') : [];
-            if (rejectedWithdrawals.length > 0) {
-                console.log('Sample rejected withdrawal from getUserWithdrawals:', rejectedWithdrawals[0]);
-                console.log('Reason field exists:', 'reason' in rejectedWithdrawals[0]);
-            }
-            
-            return response.data;
-        } catch (error) {
-            throw error.response?.data || error.message;
-        }
+    // POST /api/promoter/enroll
+    enrollPromoter: async ({ plan, promoterPrivacyPolicyVersion }) => {
+        const response = await api.post('/promoter/enroll', {
+            plan,
+            promoterPrivacyPolicyVersion,
+        });
+        return response.data;
     },
 
-    // Get referral statistics - REMOVED: API doesn't exist
-    // getReferralStats: async (token) => {
-    //     try {
-    //         const response = await api.get('/auth/getReferralStats', {
-    //             headers: {
-    //                 Authorization: `Bearer ${token}`
-    //             }
-    //         });
-    //         return response.data;
-    //     } catch (error) {
-    //         throw error.response?.data || error.message;
-    //     }
-    // },
+    // GET /api/shares/my-shares
+    getMyShares: async ({ page = 1, limit = 20 } = {}) => {
+        const response = await api.get('/shares/my-shares', {
+            params: { page, limit },
+        });
+        return response.data;
+    },
 
+    // DELETE /api/shares/:id
+    deleteShare: async (shareId) => {
+        const response = await api.delete(`/shares/${shareId}`);
+        return response.data;
+    },
 };
 
 export default promoterService;
-

@@ -1,98 +1,129 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { useCookies } from 'react-cookie';
+import { useQueryClient } from 'react-query';
+import { FaTimes, FaCheckCircle } from 'react-icons/fa';
+import { toast } from 'react-toastify';
 import { useLanguage } from '../../context/LanguageContext';
-import api from '../../services/api';
-import { FaTimes, FaBuilding, FaUser, FaEnvelope, FaPhone, FaGlobe } from 'react-icons/fa';
+import { api } from '../../services/apiConfig';
+import { promoterService } from '../../services/api';
+import { ToastOptions } from '../../helpers/ToastOptions';
 import './PartnerFormModal.scss';
 
 const modalVariants = {
-    hidden: {
-        opacity: 0,
-        scale: 0.8,
-        y: 60
-    },
+    hidden: { opacity: 0, scale: 0.85, y: 40 },
     visible: {
         opacity: 1,
         scale: 1,
         y: 0,
-        transition: {
-            type: "spring",
-            stiffness: 300,
-            damping: 30
-        }
+        transition: { type: 'spring', stiffness: 300, damping: 30 },
     },
-    exit: {
-        opacity: 0,
-        scale: 0.8,
-        y: 60,
-        transition: {
-            duration: 0.2
-        }
-    }
+    exit: { opacity: 0, scale: 0.85, y: 40, transition: { duration: 0.2 } },
 };
 
 const overlayVariants = {
     hidden: { opacity: 0 },
     visible: { opacity: 1 },
-    exit: { opacity: 0 }
+    exit: { opacity: 0 },
 };
 
-export default function PartnerFormModal({ isOpen, onClose }) {
-    const { t } = useLanguage();
-    const [cookies] = useCookies(['MegaBox']);
-    const [formData, setFormData] = useState({
-        companyName: '',
-        contactName: '',
-        email: '',
-        phone: '',
-        website: '',
-        partnershipType: '',
-        message: ''
-    });
+function getApiError(error, fallback) {
+    const msg = error?.response?.data?.message;
+    if (Array.isArray(msg)) return msg.join('\n');
+    return msg || error?.message || fallback;
+}
 
-    // Fetch user data if logged in and populate form
-    const fetchUserData = async () => {
-        try {
-            const response = await api.get('/users/profile', {
-                headers: {
-                    Authorization: `Bearer ${cookies.MegaBox}`
-                }
-            });
-            const user = response.data.data;
-            setFormData(prev => ({
-                ...prev,
-                email: user.email || prev.email,
-                contactName: user.name || user.username || prev.contactName,
-                phone: user.phone || prev.phone
-            }));
-        } catch (error) {
-            console.error('Error fetching user data:', error);
+export default function PartnerFormModal({ isOpen, onClose }) {
+    const { t, language } = useLanguage();
+    const navigate = useNavigate();
+    const [cookies] = useCookies(['MegaBox']);
+    const queryClient = useQueryClient();
+
+    const [userData, setUserData] = useState(null);
+    const [loadingProfile, setLoadingProfile] = useState(false);
+    const [policy, setPolicy] = useState(null);
+    const [policyLoading, setPolicyLoading] = useState(false);
+    const [policyError, setPolicyError] = useState(null);
+    const [plan, setPlan] = useState('views');
+    const [agreedPolicy, setAgreedPolicy] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+
+    const token = cookies.MegaBox;
+    const isLoggedIn =
+        typeof token === 'string' &&
+        token.trim().length > 0 &&
+        token !== 'undefined' &&
+        token !== 'null';
+
+    const loadData = useCallback(async () => {
+        if (!isLoggedIn) {
+            setUserData(null);
+            return;
         }
-    };
+        setLoadingProfile(true);
+        setPolicyLoading(true);
+        setPolicyError(null);
+        try {
+            const profileRes = await api.get('/users/profile');
+            const profile = profileRes.data?.data || null;
+            setUserData(profile);
+
+            if (!profile?.isPromoter) {
+                try {
+                    const policyRes = await promoterService.getPromoterPrivacyPolicy(language);
+                    setPolicy(policyRes?.policy || null);
+                } catch (err) {
+                    setPolicy(null);
+                    setPolicyError(
+                        getApiError(err, t('payouts.policyUnavailable') || 'No active promoter privacy policy found.'),
+                    );
+                }
+            }
+        } catch (error) {
+            console.error('Error loading promoter enrollment data:', error);
+            setUserData(null);
+        } finally {
+            setLoadingProfile(false);
+            setPolicyLoading(false);
+        }
+    }, [isLoggedIn, language, t]);
 
     useEffect(() => {
-        if (isOpen && cookies.MegaBox) {
-            fetchUserData();
+        if (isOpen) {
+            setAgreedPolicy(false);
+            loadData();
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isOpen, cookies.MegaBox]);
+    }, [isOpen, loadData]);
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // Handle form submission here
-        console.log('Form submitted:', formData);
-        // You can add API call here
-        onClose();
+        if (!policy?.version || !agreedPolicy) return;
+
+        setSubmitting(true);
+        try {
+            const res = await promoterService.enrollPromoter({
+                plan,
+                promoterPrivacyPolicyVersion: Number(policy.version),
+            });
+            toast.success(
+                res?.message || t('payouts.enrollSuccess') || 'Enrolled as promoter successfully',
+                ToastOptions('success'),
+            );
+            queryClient.invalidateQueries(['userAccount']);
+            queryClient.invalidateQueries(['promoterStats']);
+            queryClient.invalidateQueries(['promoterShares']);
+            onClose();
+            navigate('/Promoter/Earnings');
+        } catch (error) {
+            toast.error(getApiError(error, 'Enrollment failed'), ToastOptions('error'));
+        } finally {
+            setSubmitting(false);
+        }
     };
 
-    const handleChange = (e) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
-        });
-    };
+    const isEnrolled = userData?.isPromoter === true;
 
     return (
         <AnimatePresence mode="wait">
@@ -105,159 +136,213 @@ export default function PartnerFormModal({ isOpen, onClose }) {
                     exit="exit"
                     onClick={onClose}
                 >
-                <motion.div
-                    className="partner-form-modal__content"
-                    variants={modalVariants}
-                    initial="hidden"
-                    animate="visible"
-                    exit="exit"
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div className="partner-form-modal__header">
-                        <div>
-                            <h2 className="partner-form-modal__title">
-                                {t('partnerFormModal.title')}
-                            </h2>
-                            <p className="partner-form-modal__subtitle">
-                                {t('partnerFormModal.subtitle')}
-                            </p>
-                        </div>
-                        <button
-                            className="partner-form-modal__close"
-                            onClick={onClose}
-                        >
-                            <FaTimes />
-                        </button>
-                    </div>
-
-                    <form onSubmit={handleSubmit} className="partner-form-modal__form">
-                        <div className="partner-form-modal__field">
-                            <label className="partner-form-modal__label">
-                                <FaBuilding className="partner-form-modal__icon" />
-                                {t('partnerFormModal.companyName')}
-                            </label>
-                            <input
-                                type="text"
-                                name="companyName"
-                                value={formData.companyName}
-                                onChange={handleChange}
-                                className="partner-form-modal__input"
-                                required
-                            />
-                        </div>
-
-                        <div className="partner-form-modal__field">
-                            <label className="partner-form-modal__label">
-                                <FaUser className="partner-form-modal__icon" />
-                                {t('partnerFormModal.contactName')}
-                            </label>
-                            <input
-                                type="text"
-                                name="contactName"
-                                value={formData.contactName}
-                                onChange={handleChange}
-                                className="partner-form-modal__input"
-                                required
-                            />
-                        </div>
-
-                        <div className="partner-form-modal__field">
-                            <label className="partner-form-modal__label">
-                                <FaEnvelope className="partner-form-modal__icon" />
-                                {t('partnerFormModal.email')}
-                            </label>
-                            <input
-                                type="email"
-                                name="email"
-                                value={formData.email}
-                                onChange={handleChange}
-                                className="partner-form-modal__input"
-                                required
-                            />
-                        </div>
-
-                        <div className="partner-form-modal__field">
-                            <label className="partner-form-modal__label">
-                                <FaPhone className="partner-form-modal__icon" />
-                                {t('partnerFormModal.phone')}
-                            </label>
-                            <input
-                                type="tel"
-                                name="phone"
-                                value={formData.phone}
-                                onChange={handleChange}
-                                className="partner-form-modal__input"
-                                required
-                            />
-                        </div>
-
-                        <div className="partner-form-modal__field">
-                            <label className="partner-form-modal__label">
-                                <FaGlobe className="partner-form-modal__icon" />
-                                {t('partnerFormModal.website')}
-                            </label>
-                            <input
-                                type="url"
-                                name="website"
-                                value={formData.website}
-                                onChange={handleChange}
-                                className="partner-form-modal__input"
-                            />
-                        </div>
-
-                        <div className="partner-form-modal__field">
-                            <label className="partner-form-modal__label">
-                                {t('partnerFormModal.partnershipType')}
-                            </label>
-                            <select
-                                name="partnershipType"
-                                value={formData.partnershipType}
-                                onChange={handleChange}
-                                className="partner-form-modal__input"
-                                required
-                            >
-                                <option value="">{t('partnerFormModal.selectType')}</option>
-                                <option value="api">{t('partnersPage.partnershipTypes.api.title')}</option>
-                                <option value="whiteLabel">{t('partnersPage.partnershipTypes.whiteLabel.title')}</option>
-                                <option value="contentHosting">{t('partnersPage.partnershipTypes.contentHosting.title')}</option>
-                                <option value="reseller">{t('partnersPage.partnershipTypes.reseller.title')}</option>
-                            </select>
-                        </div>
-
-                        <div className="partner-form-modal__field">
-                            <label className="partner-form-modal__label">
-                                {t('partnerFormModal.message')}
-                            </label>
-                            <textarea
-                                name="message"
-                                value={formData.message}
-                                onChange={handleChange}
-                                className="partner-form-modal__textarea"
-                                rows="4"
-                                placeholder={t('partnerFormModal.messagePlaceholder')}
-                            />
-                        </div>
-
-                        <div className="partner-form-modal__actions">
+                    <motion.div
+                        className="partner-form-modal__content"
+                        variants={modalVariants}
+                        initial="hidden"
+                        animate="visible"
+                        exit="exit"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="partner-form-modal__header">
+                            <div>
+                                <h2 className="partner-form-modal__title">
+                                    {t('payouts.enrollTitle') || t('partnerFormModal.title')}
+                                </h2>
+                                <p className="partner-form-modal__subtitle">
+                                    {t('payouts.enrollSubtitle') || t('partnerFormModal.subtitle')}
+                                </p>
+                            </div>
                             <button
                                 type="button"
+                                className="partner-form-modal__close"
                                 onClick={onClose}
-                                className="partner-form-modal__button partner-form-modal__button--cancel"
                             >
-                                {t('partnerFormModal.cancel')}
-                            </button>
-                            <button
-                                type="submit"
-                                className="partner-form-modal__button partner-form-modal__button--submit"
-                            >
-                                {t('partnerFormModal.submit')}
+                                <FaTimes />
                             </button>
                         </div>
-                    </form>
+
+                        {!isLoggedIn ? (
+                            <div className="partner-form-modal__form" style={{ gap: '1rem' }}>
+                                <p style={{ margin: 0, color: '#4b5563' }}>
+                                    {t('payouts.loginToEnroll') || 'Sign in to your account to enroll in the Promoter Program.'}
+                                </p>
+                                <div className="partner-form-modal__actions">
+                                    <button
+                                        type="button"
+                                        onClick={onClose}
+                                        className="partner-form-modal__button partner-form-modal__button--cancel"
+                                    >
+                                        {t('partnerFormModal.cancel')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            onClose();
+                                            navigate('/login');
+                                        }}
+                                        className="partner-form-modal__button partner-form-modal__button--submit"
+                                    >
+                                        {t('payouts.goToLogin') || 'Sign In'}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : loadingProfile ? (
+                            <div className="partner-form-modal__form">
+                                <p style={{ textAlign: 'center', color: '#6b7280', margin: '1rem 0' }}>
+                                    {t('revenueData.loading') || 'Loading...'}
+                                </p>
+                            </div>
+                        ) : isEnrolled ? (
+                            <div className="partner-form-modal__form" style={{ gap: '1rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#16a34a' }}>
+                                    <FaCheckCircle style={{ fontSize: '1.5rem', flexShrink: 0 }} />
+                                    <div>
+                                        <strong>{t('partners.alreadySubscribed')}</strong>
+                                        <p style={{ margin: '0.25rem 0 0', color: '#4b5563', fontSize: '0.9rem' }}>
+                                            {userData.promoterPlan === 'views'
+                                                ? t('payouts.planViews')
+                                                : userData.promoterPlan === 'installs'
+                                                  ? t('payouts.planInstalls')
+                                                  : ''}
+                                            {userData.promoterCode
+                                                ? ` · ${t('payouts.promoterCode')}: ${userData.promoterCode}`
+                                                : ''}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="partner-form-modal__actions">
+                                    <button
+                                        type="button"
+                                        onClick={onClose}
+                                        className="partner-form-modal__button partner-form-modal__button--cancel"
+                                    >
+                                        {t('partnerFormModal.cancel')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            onClose();
+                                            navigate('/Promoter/Earnings');
+                                        }}
+                                        className="partner-form-modal__button partner-form-modal__button--submit"
+                                    >
+                                        {t('partners.seeDashboard')}
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <form onSubmit={handleSubmit} className="partner-form-modal__form">
+                                <div className="partner-form-modal__field">
+                                    <label className="partner-form-modal__label">
+                                        {t('payouts.promoterPlan') || 'Plan'}
+                                    </label>
+                                    <select
+                                        name="plan"
+                                        value={plan}
+                                        onChange={(e) => setPlan(e.target.value)}
+                                        className="partner-form-modal__input"
+                                        required
+                                    >
+                                        <option value="views">{t('payouts.planViews') || 'Views Plan'}</option>
+                                        <option value="installs">{t('payouts.planInstalls') || 'Installs Plan'}</option>
+                                    </select>
+                                </div>
+
+                                {policyLoading ? (
+                                    <p style={{ color: '#6b7280', fontSize: '0.9rem' }}>
+                                        {t('payouts.policyLoading') || 'Loading promoter privacy policy...'}
+                                    </p>
+                                ) : policyError || !policy ? (
+                                    <p style={{ color: '#dc2626', fontSize: '0.9rem' }}>
+                                        {policyError || t('payouts.policyUnavailable')}
+                                    </p>
+                                ) : (
+                                    <>
+                                        {Array.isArray(policy.sections) && policy.sections.length > 0 && (
+                                            <div
+                                                style={{
+                                                    maxHeight: '200px',
+                                                    overflowY: 'auto',
+                                                    border: '1px solid #e5e7eb',
+                                                    borderRadius: '0.5rem',
+                                                    padding: '0.75rem 1rem',
+                                                    background: '#f9fafb',
+                                                    fontSize: '0.85rem',
+                                                    lineHeight: 1.5,
+                                                }}
+                                            >
+                                                {policy.sections.map((section, sIdx) => (
+                                                    <div key={sIdx} style={{ marginBottom: '0.65rem' }}>
+                                                        <h4 style={{ margin: '0 0 0.3rem', fontWeight: 700 }}>
+                                                            {section.title}
+                                                        </h4>
+                                                        {(section.items || []).map((item, iIdx) => (
+                                                            <div key={iIdx} style={{ marginBottom: '0.3rem' }}>
+                                                                {item.heading && (
+                                                                    <strong style={{ display: 'block' }}>{item.heading}</strong>
+                                                                )}
+                                                                {item.type === 'list' && Array.isArray(item.points) ? (
+                                                                    <ul style={{ margin: '0.2rem 0 0.2rem 1.2rem', padding: 0 }}>
+                                                                        {item.points.map((pt, pIdx) => (
+                                                                            <li key={pIdx}>{pt}</li>
+                                                                        ))}
+                                                                    </ul>
+                                                                ) : (
+                                                                    item.body && <p style={{ margin: 0 }}>{item.body}</p>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        <label
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.5rem',
+                                                fontSize: '0.9rem',
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                checked={agreedPolicy}
+                                                onChange={(e) => setAgreedPolicy(e.target.checked)}
+                                                required
+                                            />
+                                            <span>
+                                                {t('payouts.enrollPolicyAgree', { version: policy.version })}
+                                            </span>
+                                        </label>
+                                    </>
+                                )}
+
+                                <div className="partner-form-modal__actions">
+                                    <button
+                                        type="button"
+                                        onClick={onClose}
+                                        className="partner-form-modal__button partner-form-modal__button--cancel"
+                                    >
+                                        {t('partnerFormModal.cancel')}
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={submitting || policyLoading || !policy?.version || !agreedPolicy}
+                                        className="partner-form-modal__button partner-form-modal__button--submit"
+                                    >
+                                        {submitting
+                                            ? t('payouts.enrolling') || 'Enrolling...'
+                                            : t('payouts.enrollButton') || 'Enroll as Promoter'}
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+                    </motion.div>
                 </motion.div>
-            </motion.div>
             )}
         </AnimatePresence>
     );
 }
-

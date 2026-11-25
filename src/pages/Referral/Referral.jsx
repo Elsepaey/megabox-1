@@ -3,53 +3,128 @@ import { useQuery } from 'react-query';
 import { useCookies } from 'react-cookie';
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
-import { userService } from '../../services/api';
-import { useLanguage } from '../../context/LanguageContext';
-import EmptyState from '../../components/EmptyState/EmptyState';
-import { FaUsers, FaLink, FaCopy, FaCheck, FaDollarSign } from 'react-icons/fa';
+import {
+    FaCopy,
+    FaCheck,
+    FaUsers,
+    FaCalendarDay,
+    FaUserCheck,
+    FaBullhorn,
+    FaExclamationTriangle,
+} from 'react-icons/fa';
 import { toast } from 'react-toastify';
+import { userService } from '../../services/userService';
+import { useLanguage } from '../../context/LanguageContext';
 import { ToastOptions } from '../../helpers/ToastOptions';
 import Loading from '../../components/Loading/Loading';
+import Pagination from '../../components/Pagination/Pagination';
 import './Referral.scss';
 
+const REFERRALS_LIMIT = 20;
+
 export default function Referral() {
-    const { t } = useLanguage();
+    const { t, language } = useLanguage();
     const [cookies] = useCookies(['MegaBox']);
     const token = cookies.MegaBox;
+    const [page, setPage] = useState(1);
     const [showRulesModal, setShowRulesModal] = useState(false);
+    const [copied, setCopied] = useState(false);
 
-    // Fetch user data for referral link (using getUserInfo instead of getReferralStats)
-    const { data: userData } = useQuery(
-        ['userAccount'],
-        () => userService.getUserInfo(token),
-        { enabled: !!token, retry: false }
+    const {
+        data: referralData,
+        isLoading,
+        isFetching,
+        isError,
+        refetch,
+    } = useQuery(
+        ['userReferrals', page],
+        () => userService.getReferralStats({ page, limit: REFERRALS_LIMIT }, token),
+        {
+            enabled: !!token,
+            keepPreviousData: true,
+            retry: false,
+        },
     );
 
+    const referralLink = referralData?.referralLink || '';
+    const stats = referralData?.stats || {
+        totalReferrals: 0,
+        todayReferrals: 0,
+        confirmedReferrals: 0,
+        promoterReferrals: 0,
+    };
+    const referrals = Array.isArray(referralData?.data) ? referralData.data : [];
+    const meta = referralData?.meta || {
+        total: 0,
+        page,
+        limit: REFERRALS_LIMIT,
+        totalPages: 0,
+    };
 
-    // Extract referral link from user data
-    const referralLink = userData?.data?.referralLink || userData?.referralLink || `https://mega-box.vercel.app/register?ref=${userData?.data?._id || userData?._id || ''}`;
-    
-    // Stats data - using default values since API doesn't exist
-    const todayRefers = 0;
-    const totalRefers = 0;
-    const todayReferralRevenue = 0;
-    const totalReferralRevenue = 0;
-    const referUsers = [];
-    const currency = 'USD';
+    const formatDate = (dateValue) => {
+        if (!dateValue) return '-';
+        const parsed = new Date(dateValue);
+        if (Number.isNaN(parsed.getTime())) return '-';
+        return parsed.toLocaleDateString(language === 'ar' ? 'ar-EG' : 'en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+        });
+    };
 
     const handleCopyLink = async () => {
+        if (!referralLink) {
+            toast.error(t('payouts.referralLinkMissing') || 'Referral link is not available', ToastOptions('error'));
+            return;
+        }
         try {
             await navigator.clipboard.writeText(referralLink);
-            toast.success(t('referral.linkCopied'), ToastOptions("success"));
+            setCopied(true);
+            toast.success(t('referral.linkCopied') || 'Referral link copied', ToastOptions('success'));
+            setTimeout(() => setCopied(false), 2000);
         } catch {
-            toast.error(t('referral.copyFailed'), ToastOptions("error"));
+            toast.error(t('referral.copyFailed') || 'Failed to copy link', ToastOptions('error'));
         }
     };
 
+    if (isLoading && !referralData) {
+        return <Loading />;
+    }
+
+    const statCards = [
+        {
+            key: 'total',
+            label: t('referral.totalRefers') || 'Total Referrals',
+            value: stats.totalReferrals ?? 0,
+            icon: FaUsers,
+        },
+        {
+            key: 'today',
+            label: t('referral.todayRefers') || 'Today Referrals',
+            value: stats.todayReferrals ?? 0,
+            icon: FaCalendarDay,
+        },
+        {
+            key: 'confirmed',
+            label: t('referral.confirmedRefers') || 'Confirmed Referrals',
+            value: stats.confirmedReferrals ?? 0,
+            icon: FaUserCheck,
+        },
+        {
+            key: 'promoter',
+            label: t('referral.promoterRefers') || 'Promoter Referrals',
+            value: stats.promoterReferrals ?? 0,
+            icon: FaBullhorn,
+        },
+    ];
+
+    const startIndex = (page - 1) * REFERRALS_LIMIT;
+    const endIndex = Math.min(page * REFERRALS_LIMIT, meta.total || 0);
+
     return (
-        <div className="referral-page">
+        <div className="referral-page" dir={language === 'ar' ? 'rtl' : 'ltr'}>
             <div className="referral-page__wrapper">
-                {/* Promotional Banner */}
+                {/* Referral Link Banner */}
                 <motion.div
                     className="referral-banner"
                     initial={{ opacity: 0, y: -20 }}
@@ -59,17 +134,41 @@ export default function Referral() {
                     <div className="referral-banner__content">
                         <div className="referral-banner__text">
                             <h2 className="referral-banner__title">
-                                <span className="referral-banner__title-text">{t('referral.bannerTitle') || '10% of referral income'}</span>
-                                <span className="referral-banner__icon">💰</span>
+                                <span className="referral-banner__title-text">
+                                    {t('payouts.referralLinkLabel') || 'Your Referral Link'}
+                                </span>
                             </h2>
+                            {referralLink ? (
+                                <p
+                                    style={{
+                                        margin: '0.5rem 0 1rem',
+                                        wordBreak: 'break-all',
+                                        fontSize: '0.9rem',
+                                        opacity: 0.95,
+                                    }}
+                                >
+                                    {referralLink}
+                                </p>
+                            ) : (
+                                <p style={{ margin: '0.5rem 0 1rem', fontSize: '0.9rem', opacity: 0.85 }}>
+                                    {t('payouts.referralLinkMissing') || 'Referral link is not available for this account.'}
+                                </p>
+                            )}
                             <div className="referral-banner__actions">
                                 <button
+                                    type="button"
                                     className="referral-banner__button"
-                                    onClick={() => handleCopyLink()}
+                                    onClick={handleCopyLink}
+                                    disabled={!referralLink}
+                                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
                                 >
-                                    {t('referral.getReferralLink') || 'Get Referral Link'}
+                                    {copied ? <FaCheck /> : <FaCopy />}
+                                    {copied
+                                        ? t('referral.copied') || 'Copied'
+                                        : t('referral.copyLink') || t('referral.getReferralLink') || 'Copy Referral Link'}
                                 </button>
                                 <button
+                                    type="button"
                                     className="referral-banner__rules"
                                     onClick={() => setShowRulesModal(true)}
                                 >
@@ -80,7 +179,143 @@ export default function Referral() {
                     </div>
                 </motion.div>
 
-                {/* Referral Link Modal */}
+                {/* 4 Stat Cards */}
+                <div className="referral-stats">
+                    {statCards.map((card, idx) => {
+                        const Icon = card.icon;
+                        return (
+                            <motion.div
+                                key={card.key}
+                                className="referral-stats__card"
+                                initial={{ opacity: 0, y: 12 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: 0.05 * idx }}
+                            >
+                                <div className="referral-stats__card-header">
+                                    <span className="referral-stats__label">{card.label}</span>
+                                    <span className="referral-stats__icon">
+                                        <Icon />
+                                    </span>
+                                </div>
+                                <div className="referral-stats__value">{card.value}</div>
+                            </motion.div>
+                        );
+                    })}
+                </div>
+
+                {/* Referred Users Table */}
+                <motion.div
+                    className="refer-users-section"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.15 }}
+                >
+                    <h3 className="refer-users-section__title">
+                        {t('referral.referUsers') || 'Referred Users'}
+                    </h3>
+
+                    {isError ? (
+                        <div className="refer-users-state">
+                            <FaExclamationTriangle className="refer-users-state__icon" />
+                            <h4 className="refer-users-state__title">
+                                {t('referral.errorTitle') || 'Error loading referral data'}
+                            </h4>
+                            <p className="refer-users-state__desc">
+                                {t('referral.errorMessage') || 'Unable to load referral data. Please try again later.'}
+                            </p>
+                            <button
+                                type="button"
+                                className="refer-users-state__retry"
+                                onClick={() => refetch()}
+                            >
+                                {t('referral.retry') || 'Retry'}
+                            </button>
+                        </div>
+                    ) : isFetching && referrals.length === 0 ? (
+                        <div className="refer-users-section__skeleton">
+                            {[0, 1, 2, 3].map((row) => (
+                                <div key={row} className="skeleton-row">
+                                    <div className="skeleton-cell" />
+                                    <div className="skeleton-cell" />
+                                    <div className="skeleton-cell" />
+                                    <div className="skeleton-cell" />
+                                </div>
+                            ))}
+                        </div>
+                    ) : referrals.length === 0 ? (
+                        <div className="refer-users-state">
+                            <FaUsers className="refer-users-state__icon" />
+                            <h4 className="refer-users-state__title">
+                                {t('referral.noReferUsers') || 'No referred users'}
+                            </h4>
+                            <p className="refer-users-state__desc">
+                                {t('referral.noReferUsersMessage') || 'No users have been referred yet'}
+                            </p>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="refer-users-table-wrap">
+                                <table className="refer-users-table__table">
+                                    <thead>
+                                        <tr>
+                                            <th>{t('referral.user') || 'User'}</th>
+                                            <th>{t('referral.status') || 'Status'}</th>
+                                            <th>{t('referral.role') || 'Account Type'}</th>
+                                            <th>{t('referral.joinedDate') || 'Joined Date'}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {referrals.map((item) => (
+                                            <tr key={item._id}>
+                                                <td>{item.username || '-'}</td>
+                                                <td>
+                                                    <span
+                                                        className={`referral-badge ${
+                                                            item.isConfirmed
+                                                                ? 'referral-badge--confirmed'
+                                                                : 'referral-badge--unconfirmed'
+                                                        }`}
+                                                    >
+                                                        {item.isConfirmed
+                                                            ? t('referral.confirmed') || 'Confirmed'
+                                                            : t('referral.unconfirmed') || 'Unconfirmed'}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span
+                                                        className={`referral-badge ${
+                                                            item.isPromoter
+                                                                ? 'referral-badge--promoter'
+                                                                : 'referral-badge--standard'
+                                                        }`}
+                                                    >
+                                                        {item.isPromoter
+                                                            ? t('referral.promoter') || 'Promoter'
+                                                            : t('referral.standard') || 'Standard'}
+                                                    </span>
+                                                </td>
+                                                <td>{formatDate(item.createdAt)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <Pagination
+                                currentPage={meta.page || page}
+                                totalPages={meta.totalPages || 0}
+                                onPageChange={setPage}
+                                showCount
+                                startIndex={startIndex}
+                                endIndex={endIndex}
+                                totalItems={meta.total || 0}
+                                itemsLabel={t('referral.referUsers') || 'Referred Users'}
+                            />
+                        </>
+                    )}
+                </motion.div>
+
+                {/* Referral Rules Modal */}
                 <AnimatePresence>
                     {showRulesModal && (
                         <motion.div
@@ -108,6 +343,7 @@ export default function Referral() {
                                     </ol>
                                 </div>
                                 <button
+                                    type="button"
                                     className="referral-modal__close"
                                     onClick={() => setShowRulesModal(false)}
                                 >
@@ -117,97 +353,7 @@ export default function Referral() {
                         </motion.div>
                     )}
                 </AnimatePresence>
-
-                {/* Stats Cards */}
-                <div className="referral-stats">
-                    <motion.div
-                        className="referral-stats__card"
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.1 }}
-                    >
-                        <h3 className="referral-stats__title">{t('referral.refers')}</h3>
-                        <div className="referral-stats__content">
-                            <div className="referral-stats__item">
-                                <span className="referral-stats__label">{t('referral.todayRefers')}</span>
-                                <span className="referral-stats__value">{todayRefers}</span>
-                            </div>
-                            <div className="referral-stats__item">
-                                <span className="referral-stats__label">{t('referral.totalRefers')}</span>
-                                <span className="referral-stats__value">{totalRefers}</span>
-                            </div>
-                        </div>
-                    </motion.div>
-
-                    <motion.div
-                        className="referral-stats__card"
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.2 }}
-                    >
-                        <h3 className="referral-stats__title">{t('referral.referralRevenue')}</h3>
-                        <div className="referral-stats__content">
-                            <div className="referral-stats__item">
-                                <span className="referral-stats__label">{t('referral.todayReferralRevenue')}</span>
-                                    <span className="referral-stats__value">{parseFloat(todayReferralRevenue || 0).toFixed(4)} {currency}</span>
-                            </div>
-                            <div className="referral-stats__item">
-                                <span className="referral-stats__label">{t('referral.totalReferralRevenue')}</span>
-                                    <span className="referral-stats__value">{parseFloat(totalReferralRevenue || 0).toFixed(4)} {currency}</span>
-                            </div>
-                        </div>
-                    </motion.div>
-                </div>
-
-                {/* Refer Users Table */}
-                <motion.div
-                    className="refer-users-section"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 }}
-                >
-                    <h3 className="refer-users-section__title">{t('referral.referUsers')}</h3>
-                    <div className="refer-users-table">
-                        <table className="refer-users-table__table">
-                            <thead>
-                                <tr>
-                                    <th>{t('referral.user')}</th>
-                                    <th>{t('referral.todayReferral')} / {currency}</th>
-                                    <th>{t('referral.totalRef')} /</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {referUsers.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="3" className="text-center py-8 text-gray-500">
-                                            <EmptyState
-                                                icon={FaUsers}
-                                                title={t('referral.noReferUsers')}
-                                                message={t('referral.noReferUsersMessage')}
-                                            />
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    referUsers.map((user, index) => (
-                                        <motion.tr
-                                            key={index}
-                                            className="refer-users-table__row"
-                                            initial={{ opacity: 0, x: -20 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ delay: index * 0.05 }}
-                                        >
-                                            <td>{user.username || user.email || '-'}</td>
-                                            <td>{parseFloat(user.todayReferral || 0).toFixed(4)} {currency}</td>
-                                            <td>{parseFloat(user.totalRef || 0).toFixed(4)} {currency}</td>
-                                        </motion.tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </motion.div>
             </div>
         </div>
     );
 }
-

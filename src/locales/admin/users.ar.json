@@ -1,0 +1,262 @@
+{
+  "staffUsers": {
+    "title": "المستخدمون",
+    "subtitle": "إدارة حسابات المستخدمين والأدوار والاشتراكات والنشاط",
+    "notificationsLink": "الإشعارات",
+    "listTitle": "حسابات المستخدمين",
+    "searchPlaceholder": "المعرّف أو بادئة البريد أو اسم المستخدم",
+    "filters": {
+      "search": "بحث",
+      "role": "الدور",
+      "status": "الحالة",
+      "confirmed": "مؤكّد",
+      "promoter": "مروّج",
+      "premium": "مميز"
+    },
+    "roles": {
+      "User": "مستخدم",
+      "Admin": "مشرف",
+      "Owner": "مالك"
+    },
+    "statuses": {
+      "active": "نشط",
+      "banned": "محظور",
+      "closed": "مغلق",
+      "deleted": "محذوف"
+    },
+    "columns": {
+      "username": "اسم المستخدم",
+      "email": "البريد الإلكتروني",
+      "role": "الدور",
+      "status": "الحالة",
+      "premium": "مميز",
+      "promoter": "مروّج",
+      "created": "تاريخ الإنشاء"
+    },
+    "detail": {
+      "title": "تفاصيل المستخدم",
+      "subtitle": "نظرة عامة على الحساب والتخزين والنشاط",
+      "viewFolders": "مجلدات المستخدم",
+      "viewShares": "مشاركات المستخدم",
+      "tabs": {
+        "overview": "نظرة عامة",
+        "storage": "التخزين",
+        "downloads": "التنزيلات",
+        "saves": "المحفوظات",
+        "archives": "الأرشيف",
+        "earnings": "الأرباح"
+      },
+      "accountInfo": "معلومات الحساب",
+      "fields": {
+        "id": "معرّف المستخدم",
+        "username": "اسم المستخدم",
+        "email": "البريد الإلكتروني",
+        "provider": "المزوّد",
+        "role": "الدور",
+        "status": "الحالة",
+        "confirmed": "تأكيد البريد",
+        "promoter": "مروّج",
+        "premium": "مميز",
+        "premiumExpires": "انتهاء الاشتراك المميز",
+        "language": "اللغة",
+        "country": "الدولة",
+        "freeQuota": "حصة التخزين المجاني",
+        "paidQuota": "حصة التخزين المدفوع",
+        "savesQuota": "حصة المحفوظات",
+        "createdAt": "تاريخ الإنشاء",
+        "bannedAt": "تاريخ الحظر",
+        "deletedAt": "تاريخ الحذف"
+      },
+      "decisions": {
+        "banTitle": "آخر قرار حظر",
+        "roleTitle": "آخر قرار دور",
+        "actor": "معرّف المشرف",
+        "at": "وقت التسجيل",
+        "reason": "السبب"
+      },
+      "actions": {
+        "ban": "حظر المستخدم",
+        "unban": "إلغاء الحظر",
+        "changeRole": "تغيير الدور",
+        "grantPremium": "منح اشتراك مميز",
+        "revokePremium": "إلغاء الاشتراك المميز",
+        "sendNotification": "إرسال إشعار",
+        "deleteUser": "حذف المستخدم"
+      },
+      "modals": {
+        "banTitle": "حظر حساب المستخدم",
+        "banDescription": "سيؤدي حظر هذا الحساب إلى إنهاء الجلسات النشطة ومنع تسجيل الدخول.",
+        "banConfirm": "حظر المستخدم",
+        "banSuccess": "تم حظر المستخدم بنجاح",
+        "unbanTitle": "إلغاء حظر حساب المستخدم",
+        "unbanDescription": "يعيد إلغاء الحظر إمكانية تسجيل الدخول لهذا الحساب.",
+        "unbanConfirm": "إلغاء الحظر",
+        "unbanSuccess": "تم إلغاء حظر المستخدم بنجاح",
+        "roleTitle": "تغيير دور المستخدم",
+        "roleDescription": "التبديل بين مستخدم ومشرف. سيتم إنهاء الجلسات النشطة للحساب.",
+        "roleLabel": "الدور الجديد",
+        "roleConfirm": "تحديث الدور",
+        "roleSuccess": "تم تحديث دور المستخدم",
+        "deleteTitle": "حذف حساب المستخدم",
+        "deleteDescription": "إزالة سجل هذا الحساب نهائيًا. لا يمكن التراجع عن هذا الإجراء.",
+        "deleteConfirm": "حذف نهائي",
+        "deleteSuccess": "تم حذف المستخدم",
+        "grantTitle": "منح اشتراك مميز",
+        "grantDescription": "اختر خطة مدفوعة نشطة. سيتم إلغاء أي اشتراك نشط حاليًا.",
+        "grantPlan": "الخطة",
+        "grantPlanPlaceholder": "اختر خطة",
+        "grantNoPlans": "لا توجد خطط مدفوعة نشطة",
+        "grantDuration": "المدة (بالأيام، اختياري)",
+        "grantDurationHint": "الافتراضي هو مدة الخطة (1–36500)",
+        "grantPrice": "المبلغ المدفوع (اختياري)",
+        "grantReference": "مرجع الدفع (اختياري)",
+        "grantConfirm": "منح الاشتراك",
+        "grantSuccess": "تم منح الاشتراك المميز",
+        "revokeTitle": "إلغاء الاشتراك المميز",
+        "revokeDescription": "يلغي الاشتراكات النشطة ويصفّر الحصة المدفوعة وينقل الملفات المدفوعة إلى فترة السماح لمدة 7 أيام.",
+        "revokeConfirm": "إلغاء الاشتراك",
+        "revokeSuccess": "تم إلغاء الاشتراك المميز",
+        "notifyTitle": "إرسال إشعار",
+        "notifyTitleField": "العنوان",
+        "notifyTitlePlaceholder": "عنوان الإشعار (1–200 حرف)",
+        "notifyBodyField": "نص الرسالة",
+        "notifyBodyPlaceholder": "محتوى الإشعار (1–2000 حرف)",
+        "notifySend": "إرسال الإشعار",
+        "notifySuccess": "تم إرسال الإشعار"
+      },
+      "storage": {
+        "usageTitle": "استخدام التخزين",
+        "freeDrive": "التخزين المجاني",
+        "paidDrive": "التخزين المدفوع",
+        "saves": "المحفوظات",
+        "usedOf": "{{used}} من {{total}} ({{percent}}%)",
+        "available": "المتاح: {{available}}",
+        "recalculate": "إعادة حساب الاستخدام",
+        "recalculating": "جارٍ إعادة الحساب…",
+        "recalculateSuccess": "تمت إعادة حساب استخدام التخزين",
+        "recalcResultTitle": "نتيجة آخر إعادة حساب",
+        "before": "قبل",
+        "after": "بعد",
+        "recalculatedAt": "وقت إعادة الحساب",
+        "recalculatedBy": "بواسطة",
+        "graceTitle": "فترة السماح",
+        "inGrace": "ضمن فترة السماح",
+        "suspendedSpace": "المساحة المعلّقة",
+        "suspendedFiles": "الملفات المعلّقة",
+        "deletionDeadline": "موعد الحذف النهائي",
+        "quotaTitle": "تحديث حصة التخزين المجاني",
+        "quotaLabel": "حصة التخزين المجاني (ميجابايت)",
+        "quotaSubmit": "تحديث الحصة",
+        "quotaSuccess": "تم تحديث حصة التخزين المجاني"
+      },
+      "downloads": {
+        "allowanceTitle": "الحد اليومي للتنزيلات",
+        "allowed": "مسموح",
+        "used": "المستخدم اليوم",
+        "remaining": "المتبقي",
+        "limit": "الحد اليومي",
+        "resetAt": "آخر إعادة ضبط",
+        "historyTitle": "سجل التنزيلات",
+        "fileId": "معرّف الملف",
+        "fileName": "اسم الملف",
+        "fileType": "النوع",
+        "fileSize": "الحجم",
+        "downloadedAt": "تاريخ التنزيل"
+      },
+      "saves": {
+        "title": "العناصر المحفوظة",
+        "folderId": "معرّف المجلد أو root",
+        "folderIdPlaceholder": "root أو معرّف المجلد",
+        "itemType": "نوع العنصر",
+        "shareId": "معرّف المشاركة",
+        "originalFileId": "معرّف الملف الأصلي",
+        "types": {
+          "file": "ملف",
+          "folder": "مجلد"
+        },
+        "columns": {
+          "type": "النوع",
+          "name": "الاسم",
+          "size": "الحجم",
+          "parent": "المجلد الأب",
+          "parentState": "حالة المجلد الأب",
+          "originalState": "حالة الأصل",
+          "shareState": "حالة المشاركة",
+          "created": "تاريخ الإنشاء"
+        },
+        "states": {
+          "root": "الجذر",
+          "available": "متاح",
+          "missing": "مفقود",
+          "none": "لا يوجد",
+          "unverified": "غير متحقق منه",
+          "active": "نشط",
+          "inactive": "غير نشط"
+        }
+      },
+      "archives": {
+        "title": "العناصر المؤرشفة",
+        "itemType": "نوع العنصر",
+        "columns": {
+          "type": "النوع",
+          "name": "الاسم",
+          "fileType": "نوع الملف",
+          "size": "الحجم",
+          "uploadStatus": "حالة الرفع",
+          "created": "تاريخ الإنشاء",
+          "detail": "عرض"
+        },
+        "openDetail": "فتح"
+      },
+      "earnings": {
+        "title": "أرباح الملفات",
+        "totalEarnings": "إجمالي الأرباح",
+        "pendingRewards": "المكافآت المعلّقة",
+        "confirmedRewards": "المكافآت المؤكّدة",
+        "columns": {
+          "fileName": "الملف",
+          "totalEarnings": "إجمالي الأرباح",
+          "pendingRewards": "معلّقة",
+          "confirmedRewards": "مؤكّدة",
+          "lastUpdated": "آخر تحديث"
+        }
+      }
+    },
+    "stats": {
+      "title": "إحصائيات المستخدمين",
+      "subtitle": "ملخص أعداد الحسابات ونمو المنصة",
+      "totalUsers": "إجمالي المستخدمين",
+      "usersLast30Days": "مستخدمون جدد (آخر 30 يومًا)",
+      "promotersCount": "المروّجون",
+      "premiumCount": "المستخدمون المميزون"
+    }
+  },
+  "staffStorage": {
+    "title": "التخزين",
+    "subtitle": "إحصائيات التخزين على المنصة وإدارة حصص الحسابات المجانية",
+    "stats": {
+      "totalFiles": "إجمالي الملفات",
+      "completedFiles": "الملفات المكتملة",
+      "totalFolders": "إجمالي المجلدات",
+      "sharedFiles": "الملفات المشتركة",
+      "uniqueSharedUsers": "المشاركون النشطون",
+      "totalUsedSpace": "إجمالي المساحة المستخدمة"
+    },
+    "bulk": {
+      "title": "تحديث حصة التخزين المجاني جماعيًا",
+      "allTitle": "تحديث جميع الحسابات",
+      "allDescription": "تعيين حصة التخزين المجاني لجميع الحسابات على المنصة.",
+      "freeTitle": "تحديث الحسابات المجانية فقط",
+      "freeDescription": "تعيين حصة التخزين المجاني للحسابات التي لا تملك اشتراكًا مدفوعًا نشطًا.",
+      "quotaLabel": "حصة التخزين المجاني (ميجابايت)",
+      "applyAll": "تطبيق على جميع المستخدمين",
+      "applyFree": "تطبيق على المستخدمين المجانيين",
+      "confirmAllTitle": "تأكيد تحديث الحصة لجميع المستخدمين",
+      "confirmAllDescription": "تعيين حصة التخزين المجاني إلى {{quota}} ميجابايت لجميع الحسابات؟",
+      "confirmFreeTitle": "تأكيد تحديث الحصة للحسابات المجانية",
+      "confirmFreeDescription": "تعيين حصة التخزين المجاني إلى {{quota}} ميجابايت لجميع الحسابات المجانية؟",
+      "updatedResult": "تم تحديث {{count}} حساب إلى {{quota}} ميجابايت.",
+      "invalidQuota": "أدخل رقمًا صحيحًا غير سالب بالميجابايت."
+    }
+  }
+}

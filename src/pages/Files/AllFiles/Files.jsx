@@ -1,18 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react'
 // eslint-disable-next-line no-unused-vars
 import { motion, AnimatePresence } from 'framer-motion';
-import { Folder } from '../../../components/Folder/Folder'
-import File from '../../../components/File/File'
 import UnifiedItemList from '../../../components/UnifiedItemList/UnifiedItemList'
-import { HiOutlinePlus } from "react-icons/hi2";
-import { LuFolderPlus, LuFolder } from "react-icons/lu";
+import { LuFolderPlus, LuFileArchive } from "react-icons/lu";
 import { HiViewGrid, HiViewList } from "react-icons/hi";
 import UploadFile from '../../../components/Upload/UploadFile/UploadFile';
 import UploadOptions from '../../../components/Upload/UploadOptions/UploadOptions';
 import UploadFromMegaBox from '../../../components/Upload/UploadFromMegaBox/UploadFromMegaBox';
+import CreateZipModal from '../../../components/Upload/CreateZipModal/CreateZipModal';
 import AddFolder from '../../../components/Upload/AddFolder/AddFolder';
-import { API_URL } from '../../../services/api';
-import { api } from '../../../services/apiConfig';
 import { useCookies } from 'react-cookie';
 import { useQuery, useQueryClient } from 'react-query';
 import { getFileCategory } from '../../../helpers/MimeType';
@@ -26,10 +22,9 @@ import { useLanguage } from '../../../context/LanguageContext';
 import ShareLinkModal from '../../../components/ShareLinkModal/ShareLinkModal';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
-import { HiUserCircle, HiArrowRightOnRectangle, HiUserGroup, HiCurrencyDollar, HiArrowUp, HiBell, HiShare, HiTicket, HiTrash } from 'react-icons/hi2';
+import { HiUserCircle, HiArrowRightOnRectangle, HiUserGroup, HiCurrencyDollar, HiArrowUp, HiBell, HiShare, HiTicket } from 'react-icons/hi2';
 import { FiGlobe, FiArchive } from 'react-icons/fi';
 import { FaUser, FaTimes } from 'react-icons/fa';
-import { LuFileArchive } from 'react-icons/lu';
 import './Files.scss';
 
 export default function Files() {
@@ -133,7 +128,9 @@ export default function Files() {
 
     const [AddFileShow, setAddFileShow] = useState(false);
     const [showUploadOptions, setShowUploadOptions] = useState(false);
-    const [showUploadFromMegaBox, setShowUploadFromMegaBox] = useState(false);
+    const [showCopyFromMegaBox, setShowCopyFromMegaBox] = useState(false);
+    const [showCreateZipModal, setShowCreateZipModal] = useState(false);
+    const [zipInitialItems, setZipInitialItems] = useState([]);
     const [AddFolderAdding, setAddFolderAdding] = useState(false);
     const [viewMode, setViewMode] = useState('grid');
     const [showShareModal, setShowShareModal] = useState(false);
@@ -145,7 +142,6 @@ export default function Files() {
 
     const ToggleShowAddFile = () => setAddFileShow(!AddFileShow);
     const ToggleUploadOptions = () => setShowUploadOptions(!showUploadOptions);
-    const ToggleUploadFromMegaBox = () => setShowUploadFromMegaBox(!showUploadFromMegaBox);
     const ToggleFolderAdding = () => setAddFolderAdding(!AddFolderAdding);
 
     const handleSelectDesktop = () => {
@@ -153,7 +149,40 @@ export default function Files() {
     };
 
     const handleSelectMegaBox = () => {
-        setShowUploadFromMegaBox(true);
+        setShowCopyFromMegaBox(true);
+    };
+
+    const handleOpenCreateZip = (items = []) => {
+        setZipInitialItems(items);
+        setShowCreateZipModal(true);
+    };
+
+    const handleCreateZipFromSelection = () => {
+        const byId = new Map((unifiedItems || []).map((it) => [String(it._id || it.id), it]));
+        const preselected = [
+            ...selectedItems.files.map((id) => {
+                const found = byId.get(String(id));
+                return { type: 'file', id: String(id), name: found?.fileName || found?.name || '' };
+            }),
+            ...selectedItems.folders.map((id) => {
+                const found = byId.get(String(id));
+                return { type: 'folder', id: String(id), name: found?.name || found?.fileName || '' };
+            }),
+        ];
+        handleOpenCreateZip(preselected);
+    };
+
+    const handleDisableShare = async (itemType, itemId) => {
+        try {
+            await fileService.disableItemShare(itemType, itemId, Token.MegaBox);
+            toast.success(t('filesV2.sharingDisabled') || 'Sharing disabled', ToastOptions('success'));
+            queryClient.invalidateQueries(['items']);
+            queryClient.invalidateQueries(['myShares']);
+            queryClient.invalidateQueries(['userFolders']);
+            refetch();
+        } catch (error) {
+            toast.error(error?.message || t('filesV2.disableSharingFailed') || 'Failed to disable sharing', ToastOptions('error'));
+        }
     };
 
     const [FilterKey, setFilterKey] = useState('All');
@@ -201,11 +230,8 @@ export default function Files() {
 
             // Special handling for archived items
             if (key === 'archived') {
-                const data = await fileService.getMyArchives(token);
-                if (!data?.files) data = { files: [] };
-                if (!data?.folders) data = { ...data, folders: [] };
-                // Convert to unified array format
-                return [...(data.folders || []), ...(data.files || [])];
+                const archived = await fileService.getMyArchives(token);
+                return [...(archived?.folders || []), ...(archived?.files || [])];
             }
 
             // For zip filter, use unified endpoint (includes both uploaded and created zips)
@@ -249,13 +275,8 @@ export default function Files() {
         return { files, folders };
     }, [unifiedItems]);
 
-    const folders = { folders: data.folders };
-    const foldersLoading = filesLoading;
-    
-    // Enhanced refetch function that also invalidates sidenav query
     const refetchFoldersWithSidenav = async () => {
-        await refFolders();
-        // Invalidate sidenav folders query to update sidebar immediately
+        await refetch();
         queryClient.invalidateQueries(['userFolders']);
         await queryClient.refetchQueries(['userFolders']);
     };
@@ -312,7 +333,7 @@ export default function Files() {
         try {
             await userService.deleteFolder(folderId, Token.MegaBox);
             toast.success(t("files.folderDeletedSuccess"), ToastOptions("success"));
-            refFolders();
+            refetch();
         } catch {
             toast.error(t("files.folderDeleteFailed"), ToastOptions("error"));
         }
@@ -352,7 +373,7 @@ export default function Files() {
                 return (oldCount || 0) + 1;
             });
             
-            await refFolders();
+            await refetch();
         } catch {
             toast.error("Failed to archive folder", ToastOptions("error"));
         }
@@ -373,37 +394,28 @@ export default function Files() {
                     setShareUrl(link);
                     setShareTitle("Share Folder");
                     setShowShareModal(true);
+                    queryClient.invalidateQueries(['items']);
+                    queryClient.invalidateQueries(['myShares']);
+                    refetch();
                 } else {
                     toast.error("Failed to generate share link", ToastOptions("error"));
                 }
             } else {
-                // Check if this is a zip file (created via createZip)
-                // Find the file in the current data to check if it's a zip
-                const file = data?.files?.find(f => (f._id || f.id) === id);
-                const isZipFile = file && (
-                    file.fileType === 'application/zip' || 
-                    file.fileType?.includes('zip') ||
-                    file.items // zip files created via createZip have an items array
-                );
-
-                let response;
-                if (isZipFile) {
-                    // Use zip-specific share link endpoint
-                    response = await fileService.generateZipShareLink(id, Token.MegaBox);
-                } else {
-                    // Use regular file share link endpoint
-                    response = await fileService.generateShareLink(id, Token.MegaBox);
-                }
-
-                // Handle different response structures
-                const link = response?.shareUrl || response?.shareLink || response?.data?.shareUrl || response?.data?.shareLink || response?.data?.data?.shareLink || response?.data?.data?.shareUrl;
+                const response = await fileService.generateShareLink(id, Token.MegaBox);
+                const link = response?.shareUrl || response?.shareLink || response?.branchUrl;
                 if (link) {
                     setShareUrl(link);
-                    setShareTitle(isZipFile ? "Share Zip File" : "Share File");
+                    setShareTitle("Share File");
                     setShowShareModal(true);
+                    queryClient.invalidateQueries(['items']);
+                    queryClient.invalidateQueries(['myShares']);
+                    refetch();
                 } else if (response?.message && (response.message.includes('نجاح') || response.message.includes('success'))) {
                     // If success message but no link, still show success (link might be in different format)
                     toast.success(response.message || "Share link generated successfully", ToastOptions("success"));
+                    queryClient.invalidateQueries(['items']);
+                    queryClient.invalidateQueries(['myShares']);
+                    refetch();
                 } else {
                     toast.error("Failed to generate share link", ToastOptions("error"));
                 }
@@ -466,6 +478,9 @@ export default function Files() {
                 setShowShareModal(true);
                 setIsSelectionMode(false);
                 setSelectedItems({ files: [], folders: [] });
+                queryClient.invalidateQueries(['items']);
+                queryClient.invalidateQueries(['myShares']);
+                refetch();
             } else {
                 toast.error("Failed to generate share link", ToastOptions("error"));
             }
@@ -568,7 +583,6 @@ export default function Files() {
             
             // Refetch to update UI
             await refetch();
-            await refFolders();
             
         } catch {
             toast.error("Failed to archive items", ToastOptions("error"));
@@ -650,7 +664,6 @@ export default function Files() {
             
             // Refetch to update UI
             await refetch();
-            await refFolders();
             
         } catch (error) {
             const errorMessage = error?.response?.data?.message || error?.message || "Failed to unarchive items";
@@ -662,56 +675,12 @@ export default function Files() {
                 queryClient.invalidateQueries({ queryKey: ["items"] });
                 queryClient.invalidateQueries({ queryKey: ["GetArchivedFilesCount"] });
                 await refetch();
-                await refFolders();
             } else {
                 toast.error(errorMessage, ToastOptions("error"));
             }
         }
     }
 
-    // Create zip from selected items
-    const createZipFromSelected = async () => {
-        if (selectedItems.files.length === 0 && selectedItems.folders.length === 0) {
-            toast.error("Please select at least one item to create zip", ToastOptions("error"));
-            return;
-        }
-
-        try {
-            // Convert to Postman collection format
-            const items = [];
-            selectedItems.files.forEach(fileId => {
-                items.push({ type: "file", id: fileId });
-            });
-            selectedItems.folders.forEach(folderId => {
-                items.push({ type: "folder", id: folderId });
-            });
-            
-            await fileService.createZip(items, Token.MegaBox);
-            
-            setIsSelectionMode(false);
-            setSelectedItems({ files: [], folders: [] });
-            // Refetch files and invalidate queries to show the new zip
-            await refetch();
-            queryClient.invalidateQueries(["items"]);
-            refFolders();
-        } catch {
-            // Error is handled in the service
-        }
-    }
-
-    const GetArchivedFilesCount = async () => {
-        try {
-            const data = await fileService.getMyArchives(Token.MegaBox);
-            return data?.files?.length || 0;
-        } catch {
-            return 0;
-        }
-    };
-
-    const { data: archivedData } = useQuery("GetArchivedFilesCount", GetArchivedFilesCount, {
-        refetchInterval: false,
-        staleTime: 30000
-    });
 
 
 
@@ -796,18 +765,23 @@ export default function Files() {
                                         setProfileMenuOpen(!profileMenuOpen);
                                     }}
                                 >
-                                    {userData?.profilePic && typeof userData.profilePic === 'string' && userData.profilePic.trim() !== '' && !profileImageError ? (
-                                        <img
-                                            src={userData.profilePic}
-                                            alt="Profile"
-                                            className="files-header__profile-image"
-                                            onError={() => setProfileImageError(true)}
-                                        />
-                                    ) : (
-                                        <div className="files-header__profile-placeholder">
-                                            <FaUser className="files-header__profile-icon" />
-                                        </div>
-                                    )}
+                                    {(() => {
+                                        const picUrl = typeof userData?.profilePic === 'string'
+                                            ? userData.profilePic
+                                            : (userData?.profilePic?.secure_url || userData?.avatar?.secure_url || '');
+                                        return picUrl && !profileImageError ? (
+                                            <img
+                                                src={picUrl}
+                                                alt="Profile"
+                                                className="files-header__profile-image"
+                                                onError={() => setProfileImageError(true)}
+                                            />
+                                        ) : (
+                                            <div className="files-header__profile-placeholder">
+                                                <FaUser className="files-header__profile-icon" />
+                                            </div>
+                                        );
+                                    })()}
                                 </button>
                                 
                                 {profileMenuOpen && (
@@ -956,23 +930,21 @@ export default function Files() {
                                             Unarchive ({selectedItems.files.length + selectedItems.folders.length})
                                         </button>
                                     ) : (
-                                        <>
-                                            <button
-                                                onClick={createZipFromSelected}
-                                                className="px-3 py-1.5 sm:px-4 sm:py-2 bg-amber-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-amber-700 transition-all flex items-center gap-2"
-                                            >
-                                                <LuFileArchive className="h-4 w-4" />
-                                                Create Zip ({selectedItems.files.length + selectedItems.folders.length})
-                                            </button>
-                                            <button
-                                                onClick={archiveMultipleItems}
-                                                className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-purple-700 transition-all flex items-center gap-2"
-                                            >
-                                                <FiArchive className="h-4 w-4" />
-                                                Archive ({selectedItems.files.length + selectedItems.folders.length})
-                                            </button>
-                                        </>
+                                        <button
+                                            onClick={archiveMultipleItems}
+                                            className="px-3 py-1.5 sm:px-4 sm:py-2 bg-purple-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-purple-700 transition-all flex items-center gap-2"
+                                        >
+                                            <FiArchive className="h-4 w-4" />
+                                            Archive ({selectedItems.files.length + selectedItems.folders.length})
+                                        </button>
                                     )}
+                                    <button
+                                        onClick={handleCreateZipFromSelection}
+                                        className="px-3 py-1.5 sm:px-4 sm:py-2 bg-amber-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-amber-700 transition-all flex items-center gap-2"
+                                    >
+                                        <LuFileArchive className="h-4 w-4" />
+                                        {t('filesV2.createZipButton') || 'Create ZIP'} ({selectedItems.files.length + selectedItems.folders.length})
+                                    </button>
                                     <button
                                         onClick={shareMultipleItems}
                                         className="px-3 py-1.5 sm:px-4 sm:py-2 bg-indigo-600 text-white text-xs sm:text-sm font-medium rounded-lg hover:bg-indigo-700 transition-all flex items-center gap-2"
@@ -982,6 +954,13 @@ export default function Files() {
                                     </button>
                                 </>
                             )}
+                            <button
+                                onClick={() => handleOpenCreateZip([])}
+                                className="px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg transition-all flex items-center gap-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                            >
+                                <LuFileArchive className="h-4 w-4" />
+                                {t('filesV2.createZipButton') || 'Create ZIP'}
+                            </button>
                             <button
                                 onClick={toggleSelectionMode}
                                 className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg transition-all flex items-center gap-2 ${
@@ -1045,53 +1024,51 @@ export default function Files() {
                         onToggleSelect={toggleItemSelection}
                         onDelete={(item) => {
                             if (item.isFolder || item.itemType === 'folder') {
-                                DeleteFolder(item);
+                                DeleteFolder(item._id || item.id);
                             } else {
                                 const fileId = item._id || item.id;
-                                // Implement file deletion
                                 fileService.deleteFile(fileId, Token.MegaBox)
                                     .then(() => {
                                         toast.success(t("files.fileDeleted"), ToastOptions("success"));
                                         refetch();
                                         queryClient.invalidateQueries("GetArchivedFilesCount");
                                     })
-                                    .catch((error) => {
+                                    .catch(() => {
                                         toast.error(t("files.deleteError"), ToastOptions("error"));
                                     });
                             }
                         }}
                         onRename={(name, close, id, isFolder) => ToggleNameChange(name, close, id, isFolder)}
                         onShare={(id, isFolder) => ShareFile(id, isFolder)}
+                        onDisableShare={handleDisableShare}
                         onArchive={(item) => {
                             if (item.isFolder || item.itemType === 'folder') {
-                                ArchiveFolder(item);
+                                ArchiveFolder(item._id || item.id);
                             } else {
-                                // Implement file archiving
                                 fileService.archiveFile(item._id || item.id, Token.MegaBox)
                                     .then(() => {
                                         toast.success(t("files.fileArchived"), ToastOptions("success"));
                                         refetch();
                                         queryClient.invalidateQueries("GetArchivedFilesCount");
                                     })
-                                    .catch((error) => {
+                                    .catch(() => {
                                         toast.error(t("files.archiveError"), ToastOptions("error"));
                                     });
                             }
                         }}
+                        refetch={refetch}
                         onOpenItem={(item) => {
                             if (item.isFolder || item.itemType === 'folder') {
-                                // Navigate to folder
                                 const folderId = item._id || item.id;
                                 const folderName = item.name || item.fileName;
-                                // Guard against undefined folderId
                                 if (!folderId || !folderName) {
                                     console.error('Cannot open folder: missing id or name', { folderId, folderName, item });
                                     toast.error("Cannot open folder: missing folder information", ToastOptions("error"));
                                     return;
                                 }
-                                navigate(`/dashboard/file/${encodeURIComponent(folderName)}/${folderId}`);
+                                const basePath = isPromoter ? '/Promoter/file' : '/dashboard/file';
+                                navigate(`${basePath}/${encodeURIComponent(folderName)}/${folderId}`);
                             } else {
-                                // Open file preview
                                 const url = item.url || item.accessUrl || item._sharedUrl || item.sharedUrl || item.shareLink;
                                 if (url) {
                                     const fileType = item.fileType || item.type;
@@ -1106,22 +1083,37 @@ export default function Files() {
 
         <AnimatePresence>
             {showUploadOptions && (
-                <UploadOptions 
-                    key="upload-options" 
+                <UploadOptions
+                    key="upload-options"
                     onClose={ToggleUploadOptions}
                     onSelectDesktop={handleSelectDesktop}
                     onSelectMegaBox={handleSelectMegaBox}
                     isPromoter={isPromoter}
                 />
             )}
-            {AddFileShow && <UploadFile key="upload-file" ToggleUploadFile={ToggleShowAddFile} refetch={refetch} />}
-            {showUploadFromMegaBox && (
-                <UploadFromMegaBox 
-                    key="upload-from-megabox" 
-                    ToggleUploadFile={ToggleUploadFromMegaBox} 
-                    refetch={refetch} 
+            {showCopyFromMegaBox && (
+                <UploadFromMegaBox
+                    key="upload-from-megabox"
+                    onClose={() => setShowCopyFromMegaBox(false)}
+                    refetch={refetch}
                 />
             )}
+            {showCreateZipModal && (
+                <CreateZipModal
+                    key="create-zip-modal"
+                    open={showCreateZipModal}
+                    onClose={() => setShowCreateZipModal(false)}
+                    folderId={null}
+                    initialItems={zipInitialItems}
+                    availableItems={unifiedItems || []}
+                    refetch={refetch}
+                    onSuccess={() => {
+                        setIsSelectionMode(false);
+                        setSelectedItems({ files: [], folders: [] });
+                    }}
+                />
+            )}
+            {AddFileShow && <UploadFile key="upload-file" ToggleUploadFile={ToggleShowAddFile} refetch={refetch} />}
             {AddFolderAdding && <AddFolder key="add-folder" ToggleUploadFile={ToggleFolderAdding} refetch={refetchFoldersWithSidenav} />}
             {ShowRepresent && <Represents key="represents" path={Path} type={fileType} ToggleUploadFile={() => Representation("", "", true)} />}
             {ShowUpdateName && (
@@ -1129,7 +1121,7 @@ export default function Files() {
                     key="change-name"
                     oldFileName={OldName}
                     Toggle={ToggleNameChange}
-                    refetch={IsFolder ? refFolders : refetch}
+                    refetch={refetch}
                     FileId={FileId}
                     isFolder={IsFolder}
                     isZip={IsZip}
